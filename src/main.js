@@ -1,0 +1,1291 @@
+window.onload = () => {
+    AudioManager.init();
+    const canvas = document.getElementById('gameCanvas');
+    initializeEngine(canvas);
+
+    window.isTouchDevice = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+
+    function handleMove(e) {
+        let clientX, clientY;
+        if (e.touches && e.touches.length > 0) {
+            clientX = e.touches[0].clientX;
+            clientY = e.touches[0].clientY;
+        } else {
+            clientX = e.clientX;
+            clientY = e.clientY;
+        }
+        state.mouseX = clientX;
+        state.mouseY = clientY;
+        
+        if (state.gameState === 'PULLING') {
+            state.pullCurrentX = clientX;
+            state.pullCurrentY = clientY;
+        }
+        
+        const cursorDot = document.getElementById('cursor-dot');
+        if (cursorDot && !e.type.includes('touch')) {
+            cursorDot.style.opacity = '1';
+            cursorDot.style.left = clientX + 'px';
+            cursorDot.style.top = clientY + 'px';
+        }
+    }
+
+    function handleUp(e) {
+        if (state.gameState === 'HOME' || state.gameState === 'INTRO' || state.gameState === 'GAMEOVER') return; 
+        if (state.gameState === 'PULLING') {
+            let dx = state.pullCurrentX - state.pullStartX;
+            let dy = state.pullCurrentY - state.pullStartY;
+            let dist = Math.sqrt(dx*dx + dy*dy);
+            
+            if (dist < 10) {
+                state.gameState = 'IDLE'; 
+                return;
+            }
+
+            if (dist > 180) { // MAX_PULL_DIST = 180
+                dx = (dx / dist) * 180;
+                dy = (dy / dist) * 180;
+            }
+
+            state.rodWhipVelocity = -state.rodRotation * 0.95; 
+            state.gameState = 'CASTING';
+            AudioManager.playCast();
+
+            state.hook.x = state.rodTip.x;
+            state.hook.y = state.rodTip.y;
+
+            let rawSpeedX = -dx * 0.045; // THROW_MULT = 0.045
+            let rawSpeedY = -dy * 0.045;
+
+            let spreadAngle = (Math.random() - 0.5) * 0.28; // THROW_SPREAD = 0.28
+            let cosA = Math.cos(spreadAngle);
+            let sinA = Math.sin(spreadAngle);
+
+            state.hook.vx = rawSpeedX * cosA - rawSpeedY * sinA;
+            state.hook.vy = (rawSpeedX * sinA + rawSpeedY * cosA) - 1.2; 
+            
+            for(let i=0; i<60; i++) { // numRopeSegments = 60
+                let t = i / 60;
+                state.ropePoints[i].x = state.rodTip.x + (state.hook.vx * 3.5 * t);
+                state.ropePoints[i].y = state.rodTip.y + (state.hook.vy * 3.5 * t);
+                state.ropePoints[i].old_x = state.ropePoints[i].x;
+                state.ropePoints[i].old_y = state.ropePoints[i].y;
+            }
+        }
+    }
+
+    function handleCanvasDown(e) {
+        AudioManager.init(); 
+        let clientX, clientY;
+        if (e.touches && e.touches.length > 0) {
+            clientX = e.touches[0].clientX;
+            clientY = e.touches[0].clientY;
+        } else {
+            clientX = e.clientX;
+            clientY = e.clientY;
+        }
+
+        if (state.gameState === 'HOME') {
+            let cx = state.logicalWidth / 2;
+            let cy = state.logicalHeight / 2;
+            let Z = state.cameraZoom;
+
+            let START_UI_X_OFFSET = -850; 
+            let screenBtnX_world = (cx + START_UI_X_OFFSET - state.cameraX);
+            let screenBtnY_world = (400 - 140 - state.cameraY); // waterSurfaceY = 400
+            
+            let buttonProjX = (screenBtnX_world - cx) * Z + cx;
+            let buttonProjY = (screenBtnY_world - cy) * Z + cy;
+
+            let hitboxW = (window.isTouchDevice ? 180 : 120) * Z;
+            let hitboxH = (window.isTouchDevice ? 80 : 45) * Z;
+
+            let dx = clientX - buttonProjX;
+            let dy = clientY - buttonProjY;
+            if (Math.abs(dx) < hitboxW / 2 && Math.abs(dy) < hitboxH / 2) {
+                state.gameState = 'INTRO';
+                AudioManager.playCast();
+                for (let i = 0; i < 15; i++) {
+                    state.wakeParticles.push(new WakeParticle(
+                        state.boatWorldX - 30,
+                        400, // waterSurfaceY = 400
+                        -2 - Math.random() * 2,
+                        15
+                    ));
+                }
+            }
+            return;
+        }
+
+        if (state.gameState === 'INTRO' || state.gameState === 'GAMEOVER') return; 
+
+        if (state.gameState === 'IDLE') {
+            const currentBoat = storeInventory.boatTypes.find(b => b.id === state.playerEquipment.boatType);
+            const maxCap = currentBoat ? currentBoat.capacity : 5;
+            
+            if (state.caughtFishStack.length >= maxCap) {
+                let breakChance = 1 - Math.pow(0.5, state.overCapacityCount + 1);
+                let riskWord = "a slight chance";
+                if (state.overCapacityCount + 1 === 2) riskWord = "a moderate chance";
+                if (state.overCapacityCount + 1 === 3) riskWord = "a major threat";
+                if (state.overCapacityCount + 1 === 4) riskWord = "an extreme hazard";
+                if (state.overCapacityCount + 1 > 4) riskWord = "imminent catastrophe";
+                showMessage(`DANGER: Boat Overloaded! Next catch has ${riskWord} to shatter the vessel!`, "danger", 240);
+            }
+            
+            if (state.playerHooks <= 0) {
+                const canAffordHook = state.playerMoney >= 10;
+                const hasCargoToSell = state.caughtFishStack.length > 0;
+                
+                if (!canAffordHook && hasCargoToSell) {
+                    showMessage("OUT OF HOOKS! Sell fish first, then purchase hooks.", "danger");
+                    triggerShiver('btn-open-store');
+                    triggerShiver('btn-open-collection');
+                } else if (canAffordHook) {
+                    showMessage("OUT OF HOOKS! Purchase replacements at Marketplace.", "danger");
+                    triggerShiver('btn-open-store');
+                } else {
+                    if (state.gameState !== 'GAMEOVER') {
+                        triggerEndgame('hookless');
+                    }
+                }
+                return;
+            }
+            state.gameState = 'PULLING';
+            state.pullStartX = clientX;
+            state.pullStartY = clientY;
+            state.pullCurrentX = clientX;
+            state.pullCurrentY = clientY;
+        } else if (state.gameState === 'REELING' && state.hookedFish) {
+            let rx = (state.hookedFish.x - state.cameraX - state.logicalWidth / 2) * state.cameraZoom + state.logicalWidth / 2;
+            let ry = (state.hookedFish.y - state.cameraY - state.logicalHeight / 2) * state.cameraZoom + state.logicalHeight / 2;
+            let dx = clientX - rx;
+            let dy = clientY - ry;
+            let dist = Math.sqrt(dx*dx + dy*dy);
+            if (dist < state.hookedFish.size * 2 * state.cameraZoom) {
+                state.hookedFish.health -= 25;
+                createBloodParticles(state.hookedFish.x, state.hookedFish.y, 4);
+                AudioManager.playReelTick();
+                
+                if (state.hookedFish.health <= 0) {
+                    state.hookedFish.isDead = true;
+                    createBloodParticles(state.hookedFish.x, state.hookedFish.y, 35);
+                    AudioManager.playDeath();
+                    showMessage(`${state.hookedFish.name} died from exhaustion! Released.`, "danger");
+                    
+                    if (state.hookedFish.isBird) {
+                        state.hookedFish.vx = 0;
+                        state.hookedFish.vy = 0.6; 
+                    }
+                    
+                    freeLaneIndex(state.hookedFish.isBird, state.hookedFish.laneIndex);
+                    state.hookedFish = null;
+                    state.gameState = 'SINKING';
+                    state.lineTension = 0;
+                    state.slackTimer = 0;
+                }
+            }
+        }
+    }
+
+    function handleGlobalDown(e) {
+        AudioManager.init();
+        if (e.target.closest && e.target.closest('.pointer-events-auto')) return;
+        let clientX, clientY;
+        if (e.touches && e.touches.length > 0) {
+            clientX = e.touches[0].clientX;
+            clientY = e.touches[0].clientY;
+        } else {
+            clientX = e.clientX;
+            clientY = e.clientY;
+        }
+        
+        const echo = document.createElement('div');
+        echo.className = 'echo-ring';
+        echo.style.left = clientX + 'px';
+        echo.style.top = clientY + 'px';
+        document.body.appendChild(echo);
+        
+        const cursorDot = document.getElementById('cursor-dot');
+        if (cursorDot && !e.type.includes('touch')) {
+            cursorDot.style.transform = 'translate(-50%, -50%) scale(1.8)';
+            setTimeout(() => {
+                if (cursorDot) cursorDot.style.transform = 'translate(-50%, -50%) scale(1)';
+            }, 100);
+        }
+        
+        setTimeout(() => echo.remove(), 400);
+    }
+
+    function triggerShiver(elementId) {
+        const el = document.getElementById(elementId);
+        if (el) {
+            el.classList.add('shiver-active');
+            setTimeout(() => el.classList.remove('shiver-active'), 400);
+        }
+    }
+
+    // Modal Helpers
+    function openModal(id, contentId) {
+        const modal = document.getElementById(id);
+        const content = document.getElementById(contentId);
+        if (modal && content) {
+            modal.classList.remove('hidden');
+            void modal.offsetWidth;
+            modal.classList.remove('opacity-0', 'pointer-events-none');
+            modal.classList.add('opacity-100');
+            content.classList.remove('scale-95');
+            content.classList.add('scale-100');
+        }
+    }
+
+    function closeModal(id, contentId) {
+        const modal = document.getElementById(id);
+        const content = document.getElementById(contentId);
+        if (modal && content) {
+            modal.classList.remove('opacity-100');
+            modal.classList.add('opacity-0', 'pointer-events-none');
+            content.classList.remove('scale-100');
+            content.classList.add('scale-95');
+            setTimeout(() => {
+                if (modal.classList.contains('opacity-0')) {
+                    modal.classList.add('hidden');
+                }
+            }, 300);
+        }
+    }
+
+    function updateBucketHUD() {
+        const currentBoat = storeInventory.boatTypes.find(b => b.id === state.playerEquipment.boatType);
+        const maxCap = currentBoat ? currentBoat.capacity : 5;
+        
+        const collectionBtn = document.getElementById('btn-open-collection');
+        const collectionCountEl = document.getElementById('collection-count');
+        if (collectionBtn) {
+            collectionBtn.textContent = `My Bucket (${state.caughtFishStack.length}/${maxCap})`;
+        }
+        if (collectionCountEl) {
+            collectionCountEl.textContent = `TOTAL: ${state.caughtFishStack.length} / ${maxCap} FISH`;
+        }
+        if (state.caughtFishStack.length <= maxCap) {
+            state.overCapacityCount = 0;
+        }
+    }
+    window.updateBucketHUD = updateBucketHUD;
+    updateBucketHUD();
+
+    function updateMoney(amount) {
+        state.playerMoney = Math.min(1000000000, Math.max(0, state.playerMoney + amount));
+        const playerMoneyDisplay = document.getElementById('player-money-display');
+        const storeMoneyDisplay = document.getElementById('store-money-display');
+        if (playerMoneyDisplay) playerMoneyDisplay.textContent = state.playerMoney.toLocaleString();
+        if (storeMoneyDisplay) storeMoneyDisplay.textContent = state.playerMoney.toLocaleString();
+    }
+    window.updateMoney = updateMoney;
+
+    function checkAndRenderBadges() {
+        if (state.playerStats.catchesCount >= 1) BADGES.first_catch.earned = true;
+        if (state.playerStats.maxDepthReached >= 300) BADGES.deep_diver.earned = true;
+        if (state.playerStats.rareCaught) BADGES.rare_hunter.earned = true;
+        if (state.playerStats.escapesCount >= 5) BADGES.escape_survivor.earned = true;
+        if (state.playerStats.goldAlbatross) BADGES.gold_albatross.earned = true;
+        if (state.playerStats.goldLeviathan) BADGES.gold_leviathan.earned = true;
+        if (state.playerStats.goldTerror) BADGES.gold_terror.earned = true;
+        if (state.playerStats.goldSunray) BADGES.gold_sunray.earned = true;
+        if (state.playerStats.goldTurtle) BADGES.gold_turtle.earned = true;
+
+        if (BADGES.gold_albatross.earned && BADGES.gold_leviathan.earned && 
+            BADGES.gold_terror.earned && BADGES.gold_sunray.earned && BADGES.gold_turtle.earned) {
+            if (!BADGES.true_fisherman.earned) {
+                BADGES.true_fisherman.earned = true;
+                showMessage("TRUE FISHERMAN BADGE UNLOCKED! Golden Rod Orb activated!", "success", 300);
+                AudioManager.playFishermanTalk();
+            }
+        }
+
+        const badgesGrid = document.getElementById('badges-grid');
+        if (!badgesGrid) return;
+        badgesGrid.innerHTML = '';
+        Object.values(BADGES).forEach(badge => {
+            const badgeCard = document.createElement('div');
+            const glowClass = badge.earned 
+                ? 'border-yellow-500/30 bg-yellow-500/5 text-yellow-800' 
+                : 'border-zinc-200/60 bg-zinc-50/50 opacity-60 text-zinc-400';
+            badgeCard.className = `p-3 rounded-xl border flex flex-col gap-1 transition-all ${glowClass}`;
+            badgeCard.innerHTML = `
+                <div class="flex justify-between items-center">
+                    <span class="font-bold text-[11px] sm:text-xs uppercase tracking-wider font-mono ${badge.earned ? 'text-yellow-600 font-black' : 'text-zinc-500'}">${badge.name}</span>
+                    <span class="text-[8px] font-mono">${badge.earned ? '★ UNLOCKED' : '☆ LOCKED'}</span>
+                </div>
+                <p class="text-[9px] sm:text-[10px] text-zinc-500 leading-snug font-mono">${badge.desc}</p>
+            `;
+            badgesGrid.appendChild(badgeCard);
+        });
+    }
+    window.checkAndRenderBadges = checkAndRenderBadges;
+
+    function openCollection() {
+        const collectionList = document.getElementById('collection-list');
+        if (!collectionList) return;
+        collectionList.innerHTML = '';
+        updateBucketHUD();
+        
+        const currentBoat = storeInventory.boatTypes.find(b => b.id === state.playerEquipment.boatType);
+        const maxCap = currentBoat ? currentBoat.capacity : 5;
+
+        if (state.caughtFishStack.length === 0) {
+            collectionList.innerHTML = `<div class="col-span-full py-12 text-center text-zinc-400 uppercase tracking-widest text-[10px] sm:text-sm font-mono">The bucket is empty. Go catch something!</div>`;
+        } else {
+            state.caughtFishStack.forEach((fish, index) => {
+                const card = document.createElement('div');
+                let rarityClass = "text-zinc-500";
+                let bgClass = "bg-white/40 border-zinc-200/80";
+                
+                if (fish.rarity === 'RARE') { rarityClass = "text-blue-600 font-semibold"; bgClass = "bg-blue-50/20 border-blue-200/60"; }
+                if (fish.rarity === 'LEGENDARY') { rarityClass = "text-orange-600 font-bold"; bgClass = "bg-orange-50/20 border-orange-200/60"; }
+                if (fish.rarity === 'MYTHIC') { rarityClass = "text-yellow-600 font-black"; bgClass = "bg-yellow-50/20 border-yellow-200/60"; }
+
+                let correctSVG = CREATURE_SVGS[fish.creatureType] || CREATURE_SVGS['fish'];
+                card.className = `${bgClass} border rounded-2xl p-3 sm:p-4 flex flex-col justify-between hover:border-zinc-300 transition-all pointer-events-auto text-zinc-900`;
+                card.innerHTML = `
+                    <div class="flex items-center space-x-3 sm:space-x-4 mb-2 sm:mb-3">
+                        <div class="w-10 h-10 sm:w-12 sm:h-12 flex-shrink-0 flex items-center justify-center rounded-full bg-zinc-100/80 text-zinc-800" style="color: ${fish.color}">
+                            ${correctSVG}
+                        </div>
+                        <div class="flex-1 min-w-0">
+                            <div class="flex justify-between items-start gap-1">
+                                <h4 class="font-bold text-zinc-900 leading-tight uppercase text-xs sm:text-sm truncate font-mono">${fish.name}</h4>
+                                <span class="text-[8px] sm:text-[9px] uppercase tracking-widest px-1 py-0.5 rounded border border-zinc-200 shrink-0 font-mono ${rarityClass}">${fish.rarity}</span>
+                            </div>
+                            <div class="text-[8px] sm:text-[10px] text-zinc-500 mt-1 font-mono uppercase tracking-widest truncate font-bold">Size: ${Math.floor(fish.size)}cm &nbsp;|&nbsp; Value: $${fish.value || 0}</div>
+                        </div>
+                    </div>
+                    <div class="flex gap-2">
+                        <button class="sell-item-btn flex-1 py-1 sm:py-1.5 bg-zinc-900 text-white hover:bg-zinc-800 text-[9px] sm:text-[10px] font-black rounded-lg uppercase transition-all font-mono cursor-pointer">
+                            Sell
+                        </button>
+                        <button class="shoot-photo-btn flex-1 py-1 sm:py-1.5 border border-zinc-200 hover:bg-zinc-100 text-zinc-700 text-[9px] sm:text-[10px] font-bold rounded-lg uppercase transition-all font-mono cursor-pointer">
+                            Photo
+                        </button>
+                    </div>
+                `;
+                
+                card.querySelector('.sell-item-btn').onclick = (e) => {
+                    e.stopPropagation();
+                    sellSingleFish(index);
+                };
+
+                card.querySelector('.shoot-photo-btn').onclick = (e) => {
+                    e.stopPropagation();
+                    AudioManager.playClick();
+                    initiatePhotoSession(fish);
+                };
+
+                collectionList.appendChild(card);
+            });
+        }
+        checkAndRenderBadges();
+        openModal('collection-modal', 'collection-modal-content');
+    }
+
+    function sellSingleFish(index) {
+        if (index >= 0 && index < state.caughtFishStack.length) {
+            let sold = state.caughtFishStack.splice(index, 1)[0];
+            updateMoney(sold.value);
+            AudioManager.playCoins();
+            showMessage(`SOLD: ${sold.name} for $${sold.value}`, "success");
+            updateBucketHUD();
+            openCollection(); 
+        }
+    }
+
+    function openStore() {
+        AudioManager.playClick();
+        const storeList = document.getElementById('store-list');
+        if (!storeList) return;
+        storeList.innerHTML = '';
+        
+        const storeMoneyDisplay = document.getElementById('store-money-display');
+        if (storeMoneyDisplay) storeMoneyDisplay.textContent = state.playerMoney.toLocaleString();
+        
+        const categories = [
+            { key: 'supplies', title: 'Supplies', type: 'supply' },
+            { key: 'rods', title: 'Gear & Rods', type: 'rod' },
+            { key: 'hats', title: 'Headwear', type: 'hat' },
+            { key: 'shirts', title: 'Clothing', type: 'shirt' },
+            { key: 'boatColors', title: 'Boat Stain', type: 'boatColor' },
+            { key: 'boatTypes', title: 'Vessel Types & Capacity', type: 'boatType' }
+        ];
+
+        categories.forEach(cat => {
+            const section = document.createElement('div');
+            section.innerHTML = `<h3 class="text-base sm:text-lg uppercase tracking-widest font-black text-zinc-800 mb-3 border-b border-zinc-200 pb-1.5 sm:pb-2 font-mono">${cat.title}</h3>`;
+            
+            const grid = document.createElement('div');
+            grid.className = 'grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3';
+            
+            storeInventory[cat.key].forEach(item => {
+                const isSupply = cat.type === 'supply';
+                const isEquipped = !isSupply && state.playerEquipment[cat.type] === item.id;
+                const isOwned = !isSupply && state.ownedItems[cat.key].includes(item.id);
+                
+                const btn = document.createElement('div');
+                
+                if (item.id === 'hook') {
+                    btn.className = `col-span-full w-full p-4 rounded-xl border bg-white/40 border-zinc-200 flex flex-col sm:flex-row items-center justify-between gap-4 text-zinc-900`;
+                    
+                    let maxAffordable = Math.floor(state.playerMoney / 10);
+                    if (state.hookBuyQty < 1) state.hookBuyQty = 1;
+                    if (state.hookBuyQty > maxAffordable && maxAffordable > 0) {
+                        state.hookBuyQty = maxAffordable;
+                    }
+                    
+                    let totalCost = state.hookBuyQty * 10;
+                    let canAfford = state.playerMoney >= totalCost;
+                    let buyBtnClass = canAfford 
+                        ? 'bg-zinc-900 text-white hover:bg-zinc-800 font-mono cursor-pointer' 
+                        : 'border border-zinc-200 text-zinc-400 cursor-not-allowed font-mono';
+
+                    btn.innerHTML = `
+                        <div class="text-center sm:text-left min-w-0">
+                            <h4 class="font-bold text-zinc-950 uppercase tracking-wide text-xs sm:text-sm font-mono">Replacement Hook</h4>
+                            <p class="text-[9px] sm:text-[10px] text-zinc-500 tracking-widest mt-0.5 sm:mt-1 leading-tight font-mono">$10 each</p>
+                        </div>
+                        <div class="flex flex-col sm:flex-row items-center justify-center sm:justify-end gap-3 shrink-0 w-full sm:w-auto">
+                            <div class="flex items-center bg-zinc-100/50 border border-zinc-200 rounded-full overflow-hidden">
+                                <button id="hook-qty-minus" class="px-3 py-1.5 hover:bg-zinc-200 text-zinc-750 font-mono text-xs sm:text-sm font-bold transition-colors select-none cursor-pointer">-</button>
+                                <span id="hook-qty-display" class="px-3 font-mono text-xs sm:text-sm text-zinc-800 font-bold min-w-[24px] text-center select-none">${state.hookBuyQty}</span>
+                                <button id="hook-qty-plus" class="px-3 py-1.5 hover:bg-zinc-200 text-zinc-750 font-mono text-xs sm:text-sm font-bold transition-colors select-none cursor-pointer">+</button>
+                            </div>
+                            <button id="hook-buy-btn" class="px-4 py-2 rounded-full text-[9px] sm:text-[10px] tracking-widest font-bold uppercase transition-colors shrink-0 ${buyBtnClass}">
+                                Buy ${state.hookBuyQty} for $${totalCost}
+                            </button>
+                        </div>
+                    `;
+
+                    setTimeout(() => {
+                        const btnMinus = document.getElementById('hook-qty-minus');
+                        const btnPlus = document.getElementById('hook-qty-plus');
+                        const btnBuy = document.getElementById('hook-buy-btn');
+                        const display = document.getElementById('hook-qty-display');
+
+                        if (btnMinus && btnPlus && btnBuy && display) {
+                            btnMinus.onclick = (e) => {
+                                e.stopPropagation();
+                                AudioManager.playClick();
+                                if (state.hookBuyQty > 1) {
+                                    state.hookBuyQty--;
+                                    updateHookQtyUI();
+                                }
+                            };
+                            btnPlus.onclick = (e) => {
+                                e.stopPropagation();
+                                AudioManager.playClick();
+                                if (state.hookBuyQty < 99) {
+                                    state.hookBuyQty++;
+                                    updateHookQtyUI();
+                                }
+                            };
+                            btnBuy.onclick = (e) => {
+                                e.stopPropagation();
+                                let cost = state.hookBuyQty * 10;
+                                if (state.playerMoney >= cost) {
+                                    state.playerHooks += state.hookBuyQty;
+                                    updateMoney(-cost);
+                                    const hooksDisplay = document.getElementById('player-hooks-display');
+                                    if (hooksDisplay) hooksDisplay.textContent = state.playerHooks;
+                                    AudioManager.playCoins();
+                                    showMessage(`Purchased ${state.hookBuyQty} hooks!`, "success", 120);
+                                    state.hookBuyQty = 1; 
+                                    openStore(); 
+                                } else {
+                                    AudioManager.playClick();
+                                    showMessage("Sufficient money is not available!", "danger", 100);
+                                }
+                            };
+                        }
+
+                        function updateHookQtyUI() {
+                            let cost = state.hookBuyQty * 10;
+                            let canAfford = state.playerMoney >= cost;
+                            display.textContent = state.hookBuyQty;
+                            btnBuy.textContent = `Buy ${state.hookBuyQty} for $${cost}`;
+                            if (canAfford) {
+                                btnBuy.className = 'px-4 py-2 rounded-full text-[9px] sm:text-[10px] tracking-widest font-bold uppercase transition-colors shrink-0 bg-zinc-900 text-white hover:bg-zinc-800 font-mono cursor-pointer';
+                            } else {
+                                btnBuy.className = 'px-4 py-2 rounded-full text-[9px] sm:text-[10px] tracking-widest font-bold uppercase transition-colors shrink-0 border border-zinc-200 text-zinc-400 cursor-not-allowed font-mono';
+                            }
+                        }
+                    }, 0);
+
+                } else {
+                    btn.className = `p-3 rounded-xl border flex items-center justify-between transition-all ${isEquipped ? 'bg-zinc-900 text-white border-zinc-900 shadow-none font-bold' : 'bg-white/40 border-zinc-200/80 hover:border-zinc-300 cursor-pointer font-bold'}`;
+                    
+                    let btnText = isEquipped ? 'EQUIPPED' : (isOwned ? 'EQUIP' : `$${item.price.toLocaleString()}`);
+                    let btnClass = isEquipped ? 'bg-white/15 text-white border border-white/20 font-mono' : 'bg-transparent border border-zinc-300 text-zinc-800 hover:bg-zinc-900 hover:text-white font-mono cursor-pointer';
+                    
+                    if (!isOwned && state.playerMoney < item.price) {
+                        btnClass = 'bg-transparent border border-zinc-200 text-zinc-400 cursor-not-allowed font-mono';
+                    }
+
+                    btn.innerHTML = `
+                        <div class="pr-2 min-w-0 text-left font-bold">
+                            <h4 class="${isEquipped ? 'text-white' : 'text-zinc-900'} font-bold uppercase tracking-wide text-[11px] sm:text-xs truncate font-mono">${item.name}</h4>
+                            <p class="${isEquipped ? 'text-white/80' : 'text-zinc-500'} text-[9px] sm:text-[10px] tracking-widest mt-0.5 sm:mt-1 leading-tight font-mono">${item.desc}</p>
+                            ${item.tensionMod && item.tensionMod < 1.0 ? `<p class="text-[8px] font-mono mt-1 uppercase tracking-widest ${isEquipped ? 'text-white/70' : 'text-zinc-400'}">Tension: -${Math.round((1 - item.tensionMod) * 100)}%</p>` : ''}
+                        </div>
+                        <button class="shrink-0 px-3 py-1.5 sm:px-4 sm:py-2 rounded-full text-[9px] sm:text-[10px] tracking-widest font-bold uppercase transition-colors ${btnClass}">
+                            ${btnText}
+                        </button>
+                    `;
+
+                    btn.onclick = () => {
+                        if (isEquipped) return;
+                        if (isOwned) {
+                            state.playerEquipment[cat.type] = item.id;
+                            AudioManager.playClick();
+                            showMessage(`Equipped ${item.name}!`, "info");
+                            updateBucketHUD();
+                            openStore();
+                        } else if (state.playerMoney >= item.price) {
+                            updateMoney(-item.price);
+                            state.ownedItems[cat.key].push(item.id);
+                            state.playerEquipment[cat.type] = item.id;
+                            AudioManager.playCoins();
+                            showMessage(`Purchased & Equipped ${item.name}!`, "success");
+                            updateBucketHUD();
+                            openStore();
+                        } else {
+                            AudioManager.playClick();
+                            showMessage("Not enough money!", "danger", 100);
+                        }
+                    };
+                }
+                grid.appendChild(btn);
+            });
+            
+            section.appendChild(grid);
+            storeList.appendChild(section);
+        });
+        
+        openModal('store-modal', 'store-modal-content');
+    }
+
+    // Web Cam & MediaPipe booth logic
+    let mpHands = null;
+
+    function initHandsTracking() {
+        if (typeof window.Hands !== 'undefined') {
+            mpHands = new window.Hands({
+                locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+            });
+            mpHands.setOptions({
+                maxNumHands: 1,
+                modelComplexity: 1,
+                minDetectionConfidence: 0.5,
+                minTrackingConfidence: 0.5
+            });
+            mpHands.onResults((results) => {
+                const canvasEl = document.getElementById('photo-canvas');
+                if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0 && canvasEl) {
+                    let lm = results.multiHandLandmarks[0];
+                    let w = canvasEl.width;
+                    let h = canvasEl.height;
+                    
+                    let p0 = { x: lm[0].x * w, y: lm[0].y * h };
+                    let p5 = { x: lm[5].x * w, y: lm[5].y * h };
+                    let p17 = { x: lm[17].x * w, y: lm[17].y * h };
+                    
+                    let d0_5 = Math.sqrt((p0.x - p5.x)**2 + (p0.y - p5.y)**2);
+                    let d0_17 = Math.sqrt((p0.x - p17.x)**2 + (p0.y - p17.y)**2);
+                    let d5_17 = Math.sqrt((p5.x - p17.x)**2 + (p5.y - p17.y)**2);
+                    
+                    let handSpan = Math.max(d0_5, d0_17, d5_17);
+                    let baselineSpan = 125;
+                    state.computedDistanceScale = Math.max(0.4, Math.min(2.5, handSpan / baselineSpan));
+                    
+                    state.trackedHandPos = {
+                        x: canvasEl.width - (lm[9].x * w), 
+                        y: lm[9].y * h
+                    };
+                } else {
+                    state.trackedHandPos = null;
+                    state.computedDistanceScale = 1.0;
+                }
+            });
+        }
+    }
+
+    function getPhotoEventPos(e) {
+        const photoCanvas = document.getElementById('photo-canvas');
+        if (!photoCanvas) return { x: 320, y: 240 };
+        const rect = photoCanvas.getBoundingClientRect();
+        let clientX, clientY;
+        if (e.touches && e.touches.length > 0) {
+            clientX = e.touches[0].clientX;
+            clientY = e.touches[0].clientY;
+        } else {
+            clientX = e.clientX;
+            clientY = e.clientY;
+        }
+        return {
+            x: ((clientX - rect.left) / rect.width) * photoCanvas.width,
+            y: ((clientY - rect.top) / rect.height) * photoCanvas.height
+        };
+    }
+
+    function startDragPhotoFish(e) {
+        e.preventDefault();
+        const pos = getPhotoEventPos(e);
+        const dX = pos.x - state.photoFishX;
+        const dY = pos.y - state.photoFishY;
+        if (Math.sqrt(dX * dX + dY * dY) < 100) {
+            state.isDraggingPhotoFish = true;
+        }
+    }
+
+    function dragPhotoFish(e) {
+        if (!state.isDraggingPhotoFish) return;
+        const pos = getPhotoEventPos(e);
+        state.photoFishX = pos.x;
+        state.photoFishY = pos.y;
+    }
+
+    function stopDragPhotoFish() {
+        state.isDraggingPhotoFish = false;
+    }
+
+    function initiatePhotoSession(fishSpec) {
+        closeModal('collection-modal', 'collection-modal-content');
+        openModal('photo-modal', 'photo-modal-content');
+        state.photoModalOpen = true;
+        
+        const photoStatus = document.getElementById('photo-status');
+        const photoSkeleton = document.getElementById('photo-skeleton');
+        const webcamVideo = document.getElementById('webcam-video');
+        const photoCanvas = document.getElementById('photo-canvas');
+
+        if (photoStatus) photoStatus.textContent = "Requesting webcam permissions...";
+        if (photoSkeleton) photoSkeleton.classList.remove('hidden');
+        
+        state.photoFishInstance = {
+            name: fishSpec.name,
+            rarity: fishSpec.rarity,
+            color: fishSpec.color,
+            size: fishSpec.size * 2.8, 
+            creatureType: fishSpec.creatureType || 'fish', 
+            x: 320,
+            y: 240,
+            vx: 0,
+            vy: 0,
+            isDead: false
+        };
+
+        state.photoFishX = 320;
+        state.photoFishY = 240;
+
+        navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 1280 }, height: { ideal: 720 } } })
+            .then(stream => {
+                state.videoStream = stream;
+                if (webcamVideo) {
+                    webcamVideo.srcObject = stream;
+                    webcamVideo.play();
+                }
+
+                const track = stream.getVideoTracks()[0];
+                const settings = track ? track.getSettings() : {};
+                const streamWidth = settings.width || 640;
+                const streamHeight = settings.height || 480;
+
+                if (photoCanvas) {
+                    photoCanvas.width = streamWidth;
+                    photoCanvas.height = streamHeight;
+                }
+                
+                state.photoFishX = streamWidth / 2;
+                state.photoFishY = streamHeight / 2;
+                if (photoStatus) photoStatus.textContent = "Webcam active. Hand-tracker initializing...";
+                
+                if (!mpHands) {
+                    initHandsTracking();
+                }
+                requestAnimationFrame(photoRenderLoop);
+            })
+            .catch(err => {
+                console.error("Webcam failed:", err);
+                if (photoStatus) photoStatus.textContent = "Webcam failed. Rendering default background.";
+                if (photoSkeleton) photoSkeleton.classList.add('hidden');
+                if (photoCanvas) {
+                    photoCanvas.width = 640;
+                    photoCanvas.height = 480;
+                }
+                state.photoFishX = 320;
+                state.photoFishY = 240;
+                requestAnimationFrame(photoRenderLoop);
+            });
+    }
+
+    async function photoRenderLoop() {
+        if (!state.photoModalOpen) return;
+        const photoCanvas = document.getElementById('photo-canvas');
+        const photoCtx = photoCanvas ? photoCanvas.getContext('2d') : null;
+        const webcamVideo = document.getElementById('webcam-video');
+        const photoSkeleton = document.getElementById('photo-skeleton');
+        const photoStatus = document.getElementById('photo-status');
+
+        if (!photoCanvas || !photoCtx) return;
+        photoCtx.clearRect(0, 0, photoCanvas.width, photoCanvas.height);
+
+        if (webcamVideo && webcamVideo.readyState >= 2) {
+            if (photoSkeleton) photoSkeleton.classList.add('hidden');
+            photoCtx.save();
+            photoCtx.translate(photoCanvas.width, 0);
+            photoCtx.scale(-1, 1);
+            photoCtx.drawImage(webcamVideo, 0, 0, photoCanvas.width, photoCanvas.height);
+            photoCtx.restore();
+
+            if (mpHands) {
+                try {
+                    await mpHands.send({ image: webcamVideo });
+                } catch(e) {}
+            }
+        } else {
+            if (photoSkeleton) photoSkeleton.classList.add('hidden');
+            photoCtx.fillStyle = '#111827';
+            photoCtx.fillRect(0, 0, photoCanvas.width, photoCanvas.height);
+        }
+
+        if (state.trackedHandPos) {
+            state.photoFishX += (state.trackedHandPos.x - state.photoFishX) * 0.3;
+            state.photoFishY += (state.trackedHandPos.y - state.photoFishY) * 0.3;
+            if (photoStatus) photoStatus.textContent = "Hand tracked! Hold still to snap the photo!";
+        } else {
+            if (photoStatus) photoStatus.textContent = "Show your hand to the camera to place the animal!";
+        }
+
+        if (state.photoFishInstance && (state.trackedHandPos || (webcamVideo && webcamVideo.readyState < 2))) {
+            let dummy = new Fish(state.photoFishInstance.creatureType === 'bird');
+            dummy.x = state.photoFishX + state.cameraX;
+            dummy.y = state.photoFishY + state.cameraY;
+            
+            dummy.size = state.photoFishInstance.size * state.computedDistanceScale; 
+            dummy.baseColor = state.photoFishInstance.color;
+            dummy.creatureType = state.photoFishInstance.creatureType;
+            dummy.name = state.photoFishInstance.name;
+            dummy.rarity = state.photoFishInstance.rarity;
+            dummy.isPhotoPreview = true; 
+            dummy.vx = 1.0; 
+            
+            photoCtx.save();
+            dummy.draw(photoCtx);
+            photoCtx.restore();
+        }
+
+        requestAnimationFrame(photoRenderLoop);
+    }
+
+    function terminatePhotoSession() {
+        state.photoModalOpen = false;
+        if (state.videoStream) {
+            state.videoStream.getTracks().forEach(track => track.stop());
+        }
+        const photoSkeleton = document.getElementById('photo-skeleton');
+        if (photoSkeleton) photoSkeleton.classList.add('hidden');
+        closeModal('photo-modal', 'photo-modal-content');
+        AudioManager.playClick();
+        openCollection();
+    }
+
+    // Action attachments
+    const btnOpenStore = document.getElementById('btn-open-store');
+    const btnOpenCollection = document.getElementById('btn-open-collection');
+    const btnOpenGuide = document.getElementById('btn-open-guide');
+
+    if (btnOpenStore) btnOpenStore.onclick = openStore;
+    if (btnOpenCollection) btnOpenCollection.onclick = () => {
+        AudioManager.playClick();
+        openCollection();
+    };
+    if (btnOpenGuide) btnOpenGuide.onclick = () => {
+        AudioManager.playClick();
+        openModal('guide-modal', 'guide-modal-content');
+    };
+
+    const btnCloseCollection = document.getElementById('close-collection');
+    if (btnCloseCollection) btnCloseCollection.onclick = () => {
+        AudioManager.playClick();
+        closeModal('collection-modal', 'collection-modal-content');
+        checkGameOver();
+    };
+
+    const btnCloseStore = document.getElementById('close-store');
+    if (btnCloseStore) btnCloseStore.onclick = () => {
+        AudioManager.playClick();
+        closeModal('store-modal', 'store-modal-content');
+        checkGameOver();
+    };
+
+    const btnUnderstandGuide = document.getElementById('guide-understand-btn');
+    if (btnUnderstandGuide) btnUnderstandGuide.onclick = () => {
+        AudioManager.playClick();
+        closeModal('guide-modal', 'guide-modal-content');
+        checkGameOver();
+    };
+
+    const sellAllBtn = document.getElementById('sell-all-btn');
+    if (sellAllBtn) {
+        sellAllBtn.onclick = () => {
+            if (state.caughtFishStack.length === 0) return;
+            let totalPayout = 0;
+            state.caughtFishStack.forEach(f => totalPayout += f.value);
+            state.caughtFishStack = []; 
+            updateMoney(totalPayout); 
+            AudioManager.playCoins();
+            showMessage(`SOLD ALL ANIMALS FOR $${totalPayout}`, "success");
+            updateBucketHUD();
+            openCollection(); 
+        };
+    }
+
+    const sortSelectElement = document.getElementById('bucket-sort-select');
+    if (sortSelectElement) {
+        sortSelectElement.onchange = (e) => {
+            state.currentSortOption = e.target.value;
+            applySort();
+            AudioManager.playClick();
+            openCollection();
+        };
+    }
+
+    const btnSnap = document.getElementById('btn-snap');
+    if (btnSnap) {
+        btnSnap.onclick = () => {
+            const photoCanvas = document.getElementById('photo-canvas');
+            if (!photoCanvas || !state.photoFishInstance) return;
+            const dataURL = photoCanvas.toDataURL("image/png");
+            const link = document.createElement('a');
+            link.href = dataURL;
+            link.download = "Fisherman_Trophy_" + state.photoFishInstance.name.replace(/\s+/g, '_') + ".png";
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            AudioManager.playSuccess();
+            showMessage("Trophy photo captured and saved!", "success");
+        };
+    }
+
+    const btnClosePhotoEl = document.getElementById('close-photo');
+    if (btnClosePhotoEl) {
+        btnClosePhotoEl.onclick = terminatePhotoSession;
+    }
+
+    const summaryRestartBtn = document.getElementById('summary-restart-btn');
+    const restartSplitContainer = document.getElementById('restart-split-container');
+    if (summaryRestartBtn && restartSplitContainer) {
+        summaryRestartBtn.onclick = () => {
+            AudioManager.playClick();
+            summaryRestartBtn.classList.add('hidden');
+            restartSplitContainer.classList.remove('hidden');
+        };
+    }
+
+    const restartConfirmCancelBtn = document.getElementById('restart-confirm-cancel-btn');
+    if (restartConfirmCancelBtn) {
+        restartConfirmCancelBtn.onclick = () => {
+            AudioManager.playClick();
+            if (restartSplitContainer) restartSplitContainer.classList.add('hidden');
+            if (summaryRestartBtn) summaryRestartBtn.classList.remove('hidden');
+        };
+    }
+
+    const restartConfirmOkBtn = document.getElementById('restart-confirm-ok-btn');
+    if (restartConfirmOkBtn) {
+        restartConfirmOkBtn.onclick = () => {
+            AudioManager.playSuccess();
+            if (restartSplitContainer) restartSplitContainer.classList.add('hidden');
+            if (summaryRestartBtn) summaryRestartBtn.classList.remove('hidden');
+            
+            // 1. Reset all state properties back to default values
+            state.cameraX = 0;
+            state.cameraY = 0;
+            state.mouseX = 0;
+            state.mouseY = 0;
+            state.boatBob = 0;
+            state.boatVy = 0;
+            state.boatTilt = 0;
+            state.boatVTilt = 0;
+            state.rodRotation = 0;
+            state.rodWhipVelocity = 0;
+            state.manFacingRight = true;
+            state.rodTip = { x: 0, y: 0 };
+            state.msgTimer = 0;
+            state.cycleTime = 0.5;
+            state.pullStartX = 0;
+            state.pullStartY = 0;
+            state.pullCurrentX = 0;
+            state.pullCurrentY = 0;
+            state.hook = { x: 0, y: 0, vx: 0, vy: 0 };
+            state.hookedFish = null;
+            state.lineTension = 0;
+            state.slackTimer = 0;
+            state.cameraZoom = 1.0;
+            state.brokenHooks = [];
+            state.isRaining = false;
+            state.currentRainIntensity = 0;
+            state.playerMoney = 0;
+            state.playerHooks = 10;
+            state.hookBuyQty = 1;
+            state.overCapacityCount = 0;
+            state.boatBroken = false;
+            state.boatBrokenTimer = 0;
+            state.fishermanSpeech = "";
+            state.fishermanSpeechTimer = 0;
+            state.caughtFishStack = [];
+            state.fishList = []; // FIX: Clear fish/birds pool completely on reset!
+            state.sessionCaughtLog = [];
+            state.currentSortOption = 'newest';
+            state.photoModalOpen = false;
+            state.photoFishInstance = null;
+            state.isDraggingPhotoFish = false;
+            state.computedDistanceScale = 1.0;
+            state.assignedFishLanes = [];
+            state.assignedBirdLanes = [];
+            state.lastPressedKey = null;
+            state.lastReelTime = 0;
+            state.reelEnergy = 0;
+            state.baseReelStrength = 2.0;
+            state.gameState = 'HOME';
+            state.playerStats = {
+                catchesCount: 0,
+                escapesCount: 0,
+                maxDepthReached: 0,
+                rareCaught: false,
+                goldAlbatross: false,
+                goldLeviathan: false,
+                goldTerror: false,
+                goldSunray: false,
+                goldTurtle: false,
+                forbiddenMammalEarned: false
+            };
+            state.playerEquipment = {
+                rod: 'wood_rod',
+                hat: 'none',
+                shirt: 'blue',
+                boatColor: 'brown',
+                boatType: 'wood'
+            };
+            state.ownedItems = {
+                rods: ['wood_rod'],
+                hats: ['none'],
+                shirts: ['blue'],
+                boatColors: ['brown'],
+                boatTypes: ['wood'],
+                supplies: []
+            };
+
+            // Reset badges
+            Object.keys(BADGES).forEach(key => {
+                BADGES[key].earned = false;
+            });
+
+            // 2. Hide endgame/gameover containers & modals
+            const endgameContainer = document.getElementById('endgame-container');
+            if (endgameContainer) {
+                endgameContainer.classList.add('hidden');
+                endgameContainer.classList.remove('fade-in-active');
+                endgameContainer.style.opacity = '0';
+            }
+
+            const summaryPhase = document.getElementById('summary-phase');
+            if (summaryPhase) summaryPhase.classList.add('hidden');
+
+            const hooklessPhase = document.getElementById('hookless-phase');
+            if (hooklessPhase) hooklessPhase.classList.add('hidden');
+
+            const boatlessPhase = document.getElementById('boatless-phase');
+            if (boatlessPhase) boatlessPhase.classList.add('hidden');
+
+            // 3. Remove fade-out-active and hide all HUD elements
+            const elementsToReset = [
+                document.getElementById('depth-hud'),
+                document.getElementById('nav-hud'),
+                document.getElementById('drum-controller'),
+                document.getElementById('message-box')
+            ];
+            elementsToReset.forEach(el => {
+                if (el) {
+                    el.classList.remove('fade-out-active');
+                    el.classList.add('hidden');
+                }
+            });
+
+            // 4. Reset modals
+            closeModal('collection-modal', 'collection-modal-content');
+            closeModal('store-modal', 'store-modal-content');
+            closeModal('guide-modal', 'guide-modal-content');
+
+            // 5. Update React/DOM HUD displays
+            updateBucketHUD();
+            updateMoney(0);
+            checkAndRenderBadges();
+
+            // 6. Re-initialize the game engine canvas
+            const canvas = document.getElementById('gameCanvas');
+            initializeEngine(canvas);
+        };
+    }
+
+    function triggerTouchDrum(side) {
+        if (state.gameState === 'HOME' || state.gameState === 'INTRO' || state.gameState === 'GAMEOVER') return; 
+        AudioManager.init(); 
+        if (side !== state.lastPressedKey) {
+            state.lastPressedKey = side;
+            state.lastReelTime = Date.now(); 
+            
+            let energyGain = 45; 
+            state.reelEnergy = Math.min(220, state.reelEnergy + energyGain);
+            AudioManager.playReelTick();
+            
+            const btnId = side === 'ControlLeft' ? 'btn-drum-left' : 'btn-drum-right';
+            const btn = document.getElementById(btnId);
+            if (btn) {
+                btn.style.backgroundColor = '#ffffff';
+                btn.style.color = '#000000';
+                setTimeout(() => {
+                    btn.style.backgroundColor = '';
+                    btn.style.color = '';
+                }, 80);
+            }
+        }
+    }
+
+    const handleDrumLeft = (e) => {
+        e.preventDefault();
+        triggerTouchDrum('ControlLeft');
+    };
+    const handleDrumRight = (e) => {
+        e.preventDefault();
+        triggerTouchDrum('ControlRight');
+    };
+
+    const btnDrumLeft = document.getElementById('btn-drum-left');
+    const btnDrumRight = document.getElementById('btn-drum-right');
+    if (btnDrumLeft) {
+        btnDrumLeft.addEventListener('touchstart', handleDrumLeft, {passive: false});
+        btnDrumLeft.addEventListener('mousedown', handleDrumLeft);
+    }
+    if (btnDrumRight) {
+        btnDrumRight.addEventListener('touchstart', handleDrumRight, {passive: false});
+        btnDrumRight.addEventListener('mousedown', handleDrumRight);
+    }
+
+    // Developer Console commands
+    const consoleInput = document.getElementById('console-input');
+    if (consoleInput) {
+        consoleInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' || e.key === 'Esc') {
+                const devConsole = document.getElementById('dev-console');
+                if (devConsole) devConsole.classList.add('hidden');
+            }
+            if (e.key === 'Enter') {
+                const val = consoleInput.value.trim();
+                const giveMoneyPattern = /^\/give\s+money\s+(\d+)$/i;
+                const setZoomPattern = /^\/set\s+zoom\s+([0-9.]+|default)$/i;
+                const endPattern = /^\/set\s+end\s+(hook|boat)$/i;
+                
+                const match = val.match(giveMoneyPattern);
+                const zoomMatch = val.match(setZoomPattern);
+                const endMatch = val.match(endPattern);
+                
+                const devConsole = document.getElementById('dev-console');
+
+                if (match) {
+                    const amount = parseInt(match[1], 10);
+                    if (amount > 1000000000 || state.playerMoney + amount > 1000000000) {
+                        showMessage("Developer Mode: Capped balance at $1,000,000,000 limit!", "danger");
+                    } else {
+                        showMessage("Developer Mode: Granted $" + amount.toLocaleString(), "success");
+                    }
+                    updateMoney(amount);
+                    AudioManager.playCoins();
+                } else if (zoomMatch) {
+                    const zoomValStr = zoomMatch[1].toLowerCase();
+                    if (zoomValStr === 'default') {
+                        state.developerZoomOverride = null;
+                        showMessage("Developer Mode: Camera zoom reset", "success");
+                    } else {
+                        const zoomVal = parseFloat(zoomValStr);
+                        if (!isNaN(zoomVal) && zoomVal >= 0.1 && zoomVal <= 5.0) {
+                            state.developerZoomOverride = zoomVal;
+                            showMessage("Developer Mode: Camera zoom set to " + zoomVal + "x", "success");
+                        } else {
+                            showMessage("Developer Mode: Choose a zoom factor between 0.1 and 5.0", "danger");
+                        }
+                    }
+                } else if (endMatch) {
+                    let isBoat = endMatch[1].toLowerCase() === 'boat';
+                    if (isBoat) {
+                        showMessage("CRITICAL: THE BOAT SPLIT UNDER THE INTENSE CARGO WEIGHT!", "danger");
+                        state.boatBroken = true;
+                        state.boatBrokenTimer = 20; 
+                        
+                        let bColor = storeInventory.boatColors.find(c => c.id === state.playerEquipment.boatColor).color;
+                        createWoodExplosion(state.boatWorldX, 400 + state.boatBob, bColor, 120); // waterSurfaceY = 400
+                        createParticles(state.boatWorldX, 400, '#ffffff', 40); 
+                        
+                        AudioManager.playExplosion();
+                        AudioManager.playSplash();
+                        
+                        resetHook();
+                    } else {
+                        triggerEndgame('hookless');
+                    }
+                    if (devConsole) devConsole.classList.add('hidden');
+                } else if (val === '/give forbidden gold') {
+                    state.playerStats.goldAlbatross = true;
+                    state.playerStats.goldLeviathan = true;
+                    state.playerStats.goldTerror = true;
+                    state.playerStats.goldSunray = true;
+                    state.playerStats.goldTurtle = true;
+                    state.playerStats.rareCaught = true;
+                    state.playerStats.catchesCount = Math.max(state.playerStats.catchesCount, 1);
+                    state.playerStats.maxDepthReached = Math.max(state.playerStats.maxDepthReached, 300);
+                    state.playerStats.escapesCount = Math.max(state.playerStats.escapesCount, 5);
+                    
+                    if (!state.playerStats.forbiddenMammalEarned) {
+                        state.playerStats.forbiddenMammalEarned = true;
+                        
+                        const cheatFish = {
+                            name: "The Forbidden Mammal",
+                            rarity: "MYTHIC",
+                            color: "#ffd700",
+                            size: 135,
+                            value: 50000,
+                            creatureType: "dolphin",
+                            catchId: Date.now()
+                        };
+
+                        state.caughtFishStack.push(cheatFish);
+                        state.sessionCaughtLog.push(cheatFish); 
+                        applySort();
+                        updateBucketHUD();
+                    }
+                    
+                    checkAndRenderBadges();
+                    AudioManager.playSuccess();
+                    showMessage("Developer Mode: Unlocked True Fisherman & Golden Rod Orb!", "success");
+                } else {
+                    showMessage("Command unknown or incorrectly formatted", "danger");
+                }
+                if (devConsole) devConsole.classList.add('hidden');
+            }
+        });
+    }
+
+    // Global Listeners
+    window.addEventListener('mousemove', handleMove);
+    window.addEventListener('touchmove', handleMove, {passive: false});
+    window.addEventListener('mouseup', handleUp);
+    window.addEventListener('touchend', handleUp);
+    
+    canvas.addEventListener('mousedown', handleCanvasDown);
+    canvas.addEventListener('touchstart', handleCanvasDown, {passive: false});
+    
+    window.addEventListener('mousedown', handleGlobalDown);
+    window.addEventListener('touchstart', handleGlobalDown, {passive: false});
+    
+    const photoCanvas = document.getElementById('photo-canvas');
+    if (photoCanvas) {
+        photoCanvas.addEventListener('mousedown', startDragPhotoFish);
+        photoCanvas.addEventListener('touchstart', startDragPhotoFish, {passive: false});
+    }
+    
+    window.addEventListener('mousemove', dragPhotoFish);
+    window.addEventListener('touchmove', dragPhotoFish, {passive: false});
+    window.addEventListener('mouseup', stopDragPhotoFish);
+    window.addEventListener('touchend', stopDragPhotoFish);
+
+    function handleKeyDown(e) {
+        if (state.gameState === 'HOME' || state.gameState === 'INTRO' || state.gameState === 'GAMEOVER') return; 
+        const devConsole = document.getElementById('dev-console');
+        if (devConsole && !devConsole.classList.contains('hidden')) return;
+        let virtualCode = null;
+        
+        if (e.code === 'ControlLeft' || e.code === 'KeyA' || e.code === 'ArrowLeft') {
+            virtualCode = 'ControlLeft';
+        } else if (e.code === 'ControlRight' || e.code === 'KeyD' || e.code === 'ArrowRight') {
+            virtualCode = 'ControlRight';
+        }
+
+        if (virtualCode) {
+            e.preventDefault();
+            if (e.repeat) return; 
+
+            if (virtualCode !== state.lastPressedKey) {
+                state.lastPressedKey = virtualCode;
+                state.lastReelTime = Date.now(); 
+                
+                let energyGain = 45; 
+                state.reelEnergy = Math.min(220, state.reelEnergy + energyGain);
+                AudioManager.playReelTick();
+                
+                const btn = document.getElementById(virtualCode === 'ControlLeft' ? 'btn-drum-left' : 'btn-drum-right');
+                if (btn) {
+                    btn.style.backgroundColor = '#ffffff';
+                    btn.style.color = '#000000';
+                    setTimeout(() => {
+                        btn.style.backgroundColor = '';
+                        btn.style.color = '';
+                    }, 80);
+                }
+            }
+        }
+    }
+
+    function handleSlashKey(e) {
+        if (state.gameState === 'HOME' || state.gameState === 'INTRO') return; 
+        const devConsole = document.getElementById('dev-console');
+        
+        if (devConsole && !devConsole.classList.contains('hidden')) {
+            if (e.key === 'Escape' || e.key === 'Esc') {
+                e.preventDefault();
+                devConsole.classList.add('hidden');
+            }
+            return;
+        }
+        
+        if (e.key === '/') {
+            e.preventDefault();
+            const devConsoleEl = document.getElementById('dev-console');
+            const consoleInputEl = document.getElementById('console-input');
+            if (devConsoleEl) {
+                devConsoleEl.classList.remove('hidden');
+                if (consoleInputEl) {
+                    consoleInputEl.value = '/'; 
+                    setTimeout(() => consoleInputEl.focus(), 50);
+                }
+            }
+        }
+    }
+
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keydown', handleSlashKey);
+
+    const handleResize = () => {
+        resizeEngine();
+    };
+    window.addEventListener('resize', handleResize);
+
+    // Hide glowing cursor dot when leaving bounds
+    const handleMouseLeave = () => {
+        const dot = document.getElementById('cursor-dot');
+        if (dot) dot.style.opacity = '0';
+    };
+    const handleMouseEnter = () => {
+        const dot = document.getElementById('cursor-dot');
+        if (dot && !window.isTouchDevice) dot.style.opacity = '1';
+    };
+
+    document.addEventListener('mouseleave', handleMouseLeave);
+    document.addEventListener('mouseenter', handleMouseEnter);
+};

@@ -1,0 +1,407 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>The Fisherman - Immersive Edition</title>
+    <!-- Tailwind CSS Play CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              zinc: {
+                750: '#202024',
+                850: '#1c1c20',
+                950: '#09090b',
+              }
+            }
+          }
+        }
+      }
+    </script>
+    <!-- MediaPipe modules for webcam hand tracking capabilities -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+    <style>
+      body, html {
+          margin: 0;
+          padding: 0;
+          width: 100%;
+          height: 100%;
+          overflow: hidden;
+          background-color: #010206;
+          font-family: 'Inter', sans-serif;
+          touch-action: none;
+      }
+      /* Enforce custom cursor style on desktop devices */
+      * { 
+          cursor: none !important; 
+          scrollbar-width: none;
+          -ms-overflow-style: none;
+      }
+      *::-webkit-scrollbar {
+          display: none;
+      }
+      /* Sleek custom glowing cursor dot */
+      .cursor-dot {
+          position: fixed;
+          top: 0;
+          left: 0;
+          width: 8px;
+          height: 8px;
+          background-color: white;
+          border-radius: 50%;
+          pointer-events: none;
+          z-index: 99999;
+          transform: translate(-50%, -50%);
+          box-shadow: 0 0 10px rgba(255,255,255,0.8);
+          transition: transform 0.1s, width 0.2s, height 0.2s, opacity 0.2s;
+          opacity: 0; /* Hidden until mouse enters canvas */
+      }
+      /* Expanding echo click ripples */
+      .echo-ring {
+          position: fixed;
+          top: 0; left: 0;
+          border: 2px solid rgba(255, 255, 255, 0.85);
+          border-radius: 50%;
+          pointer-events: none;
+          z-index: 99998;
+          transform: translate(-50%, -50%);
+          animation: echoAnim 0.4s ease-out forwards;
+      }
+      /* Light-theme tailored scrollbar for the new simplistic white panels */
+      .custom-scrollbar::-webkit-scrollbar {
+          width: 6px;
+      }
+      .custom-scrollbar::-webkit-scrollbar-track {
+          background: rgba(255, 255, 255, 0.05);
+      }
+      .custom-scrollbar::-webkit-scrollbar-thumb {
+          background: rgba(255, 255, 255, 0.2);
+          border-radius: 3px;
+      }
+      .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+          background: rgba(255, 255, 255, 0.45);
+      }
+      @media (pointer: coarse) {
+          .cursor-dot { display: none !important; }
+      }
+      @media (pointer: fine) {
+          #drum-controller { display: none !important; }
+      }
+      @keyframes echoAnim {
+          0% { width: 0px; height: 0px; opacity: 1; border-width: 3px; }
+          100% { width: 45px; height: 45px; opacity: 0; border-width: 1px; }
+      }
+      /* Attention Grabber Shiver Animation */
+      @keyframes shiver {
+          0%, 100% { transform: translateX(0) scale(1); }
+          15%, 45%, 75% { transform: translateX(-6px) scale(1.03); }
+          30%, 60%, 90% { transform: translateX(6px) scale(1.03); }
+      }
+      .shiver-active {
+          animation: shiver 0.4s ease-in-out;
+      }
+      .floating {
+          animation: floatAnim 4s ease-in-out infinite;
+      }
+      @keyframes floatAnim {
+          0%, 100% { transform: translateY(0px); }
+          50% { transform: translateY(-10px); }
+      }
+      /* Smooth custom transition classes for game over fade sequence */
+      .fade-out-active {
+          opacity: 0 !important;
+          transition: opacity 1.0s ease-in-out !important;
+          pointer-events: none !important;
+      }
+      .fade-in-active {
+          opacity: 1 !important;
+          transition: opacity 1.5s ease-in-out !important;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="cursor-dot" class="cursor-dot"></div>
+    <canvas id="gameCanvas" style="display: block;"></canvas>
+
+    <div id="ui-layer" class="transition-all duration-500">
+        <!-- Floating UI Navigation -->
+        <div id="nav-hud" class="hidden absolute top-4 right-4 sm:top-6 sm:right-6 flex gap-3 sm:gap-6 items-center z-50 pointer-events-auto transition-opacity duration-1000">
+            <button id="btn-open-guide" class="w-6 h-6 sm:w-8 sm:h-8 rounded-full border border-white/20 hover:border-white flex items-center justify-center text-white/70 hover:text-white transition-all font-mono text-xs sm:text-sm font-bold outline-none cursor-pointer" title="Fishing Guide">
+                ?
+            </button>
+            <button id="btn-open-store" class="text-white/70 hover:text-white transition-all font-mono text-[10px] sm:text-xs tracking-widest uppercase hover:underline py-1 outline-none cursor-pointer">
+                Marketplace
+            </button>
+            <button id="btn-open-collection" class="text-white/70 hover:text-white transition-all font-mono text-[10px] sm:text-xs tracking-widest uppercase hover:underline py-1 outline-none cursor-pointer">
+                My Bucket (0/5)
+            </button>
+        </div>
+
+        <!-- Touch Drum Controller -->
+        <div id="drum-controller" class="hidden absolute bottom-6 left-1/2 transform -translate-x-1/2 flex gap-6 sm:gap-10 z-50 pointer-events-auto select-none touch-none transition-opacity duration-1000">
+            <button id="btn-drum-left" class="w-16 h-16 sm:w-20 sm:h-20 bg-transparent border border-white/20 hover:border-white text-white/70 hover:text-white rounded-full flex flex-col items-center justify-center font-mono text-[10px] tracking-widest transition-all outline-none active:scale-95 cursor-pointer">
+                <span class="text-lg sm:text-xl font-bold">L</span>
+                <span class="text-[6px] sm:text-[7px] opacity-40 uppercase tracking-wider">A / Ctrl</span>
+            </button>
+            <button id="btn-drum-right" class="w-16 h-16 sm:w-20 sm:h-20 bg-transparent border border-white/20 hover:border-white text-white/70 hover:text-white rounded-full flex flex-col items-center justify-center font-mono text-[10px] tracking-widest transition-all outline-none active:scale-95 cursor-pointer">
+                <span class="text-lg sm:text-xl font-bold">R</span>
+                <span class="text-[6px] sm:text-[7px] opacity-40 uppercase tracking-wider">D / Ctrl</span>
+            </button>
+        </div>
+
+        <!-- Telemetry Signal Box -->
+        <div id="message-box" class="hidden fixed top-20 left-4 sm:top-auto sm:bottom-6 sm:left-6 text-white font-mono pointer-events-auto z-[250] flex flex-col gap-0.5 transition-all max-w-[calc(100%-2rem)] sm:max-w-xs duration-1000 select-none">
+            <span id="msg-meta" class="text-[8px] sm:text-[9px] tracking-widest text-white/40 uppercase font-bold">Telemetry Signal</span>
+            <span id="msg-text" class="text-xs sm:text-sm font-bold tracking-wide uppercase leading-snug text-white/90">NOTIFICATION LOG</span>
+        </div>
+
+        <!-- Watermark -->
+        <div id="watermark" class="absolute bottom-6 left-1/2 transform -translate-x-1/2 text-white/30 font-mono text-[9px] tracking-[0.2em] uppercase select-none pointer-events-none z-50 transition-opacity duration-1000 opacity-0">
+            Made by Vincent L
+        </div>
+
+        <!-- Hidden components keeping telemetry alive -->
+        <div id="hud-panel" class="hidden">
+            <span id="player-money-display">0</span>
+            <span id="player-hooks-display">10</span>
+        </div>
+
+        <!-- Catch Collection Modal -->
+        <div id="collection-modal" class="hidden fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm p-3 sm:p-4 opacity-0 pointer-events-none transition-all duration-300">
+            <div id="collection-modal-content" class="border border-zinc-200/60 w-full max-w-2xl max-h-[90vh] sm:max-h-[80vh] rounded-3xl overflow-hidden flex flex-col shadow-none text-zinc-900 transform scale-95 transition-all duration-300 bg-white/80 backdrop-blur-md">
+                <div class="p-4 sm:p-6 border-b border-zinc-200/60 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+                    <div>
+                        <h2 class="text-xl sm:text-3xl font-black text-zinc-950 tracking-tighter uppercase font-mono">YOUR BUCKET</h2>
+                        <p class="text-zinc-500 text-[9px] sm:text-xs font-bold uppercase tracking-widest font-mono">Select caught animals to sell for cash or take photos</p>
+                    </div>
+                    <div class="flex items-center gap-3 w-full sm:w-auto justify-between sm:justify-end">
+                        <div class="flex items-center gap-2">
+                            <span class="text-zinc-400 text-[9px] sm:text-xs font-bold uppercase tracking-widest font-mono">Sort:</span>
+                            <select id="bucket-sort-select" class="bg-white border border-zinc-200 text-zinc-900 text-[10px] sm:text-xs rounded-lg px-2 py-1.5 outline-none font-mono tracking-wider focus:border-zinc-400 transition-colors cursor-pointer">
+                                <option value="newest">Newest First</option>
+                                <option value="oldest">Oldest First</option>
+                                <option value="size_desc">Largest First</option>
+                                <option value="rarity_desc">Rarest First</option>
+                                <option value="value_desc">Most Valuable</option>
+                            </select>
+                        </div>
+                        <button id="close-collection" class="p-1.5 sm:p-2 hover:bg-zinc-200/50 text-zinc-500 hover:text-zinc-900 rounded-full transition-colors shrink-0 cursor-pointer">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6 sm:w-8 sm:h-8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6 custom-scrollbar bg-transparent">
+                    <div id="collection-list" class="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 animate-fade-in"></div>
+
+                    <div class="border-t border-zinc-200/60 pt-6">
+                        <h3 class="text-sm sm:text-base font-black text-zinc-850 mb-4 uppercase tracking-wider font-mono">My Fishing Badges</h3>
+                        <div id="badges-grid" class="grid grid-cols-1 sm:grid-cols-2 gap-3"></div>
+                    </div>
+                </div>
+
+                <div class="p-4 border-t border-zinc-200/60 flex justify-between items-center px-4 sm:px-8">
+                    <span id="collection-count" class="text-zinc-800 font-mono text-xs sm:text-sm tracking-widest uppercase font-bold">TOTAL: 0 / 5 FISH</span>
+                    <button id="sell-all-btn" class="px-4 py-2 sm:px-6 sm:py-2 border border-zinc-300 hover:bg-zinc-900 hover:text-white text-zinc-850 rounded-full text-[10px] sm:text-xs font-black tracking-widest uppercase transition-colors font-mono cursor-pointer">Sell Entire Catch</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Marketplace Modal -->
+        <div id="store-modal" class="hidden fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm p-3 sm:p-4 opacity-0 pointer-events-none transition-all duration-300">
+            <div id="store-modal-content" class="border border-zinc-200/60 w-full max-w-2xl max-h-[90vh] sm:max-h-[80vh] rounded-3xl overflow-hidden flex flex-col shadow-none text-zinc-900 transform scale-95 transition-all duration-300 bg-white/80 backdrop-blur-md">
+                <div class="p-4 sm:p-6 border-b border-zinc-200/60 flex justify-between items-center">
+                    <div>
+                        <h2 class="text-xl sm:text-3xl font-black text-zinc-950 tracking-tighter uppercase font-mono">MARKETPLACE</h2>
+                        <p class="text-zinc-500 text-[9px] sm:text-xs font-bold uppercase tracking-widest font-mono">Upgrade your gear and purchase supplies</p>
+                    </div>
+                    <div class="flex items-center gap-3 sm:gap-6">
+                        <div class="text-right">
+                            <div class="text-[9px] sm:text-xs text-zinc-400 uppercase tracking-widest mb-0.5 font-mono">Balance</div>
+                            <div class="text-lg sm:text-2xl font-mono text-zinc-900 font-bold">$<span id="store-money-display">0</span></div>
+                        </div>
+                        <button id="close-store" class="p-1.5 sm:p-2 hover:bg-zinc-200/50 text-zinc-500 hover:text-zinc-900 rounded-full transition-colors cursor-pointer">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6 sm:w-8 sm:h-8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                        </button>
+                    </div>
+                </div>
+                
+                <div id="store-list" class="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6 sm:space-y-8 custom-scrollbar bg-transparent"></div>
+            </div>
+        </div>
+
+        <!-- Fishing Guide Modal -->
+        <div id="guide-modal" class="hidden fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm p-3 sm:p-4 opacity-0 pointer-events-none transition-all duration-300">
+            <div id="guide-modal-content" class="border border-zinc-200/60 w-full max-w-lg rounded-3xl overflow-hidden flex flex-col shadow-none text-zinc-900 transform scale-95 transition-all duration-300 bg-white/80 backdrop-blur-md">
+                <div class="p-4 sm:p-6 border-b border-zinc-200/60 flex justify-between items-center">
+                    <div>
+                        <h2 class="text-xl sm:text-3xl font-black text-zinc-950 tracking-tighter uppercase font-mono">FISHING GUIDE</h2>
+                        <p class="text-zinc-500 text-[9px] sm:text-xs font-bold uppercase tracking-widest font-mono">Controls & Exploration Mechanics</p>
+                    </div>
+                </div>
+                
+                <div class="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6 custom-scrollbar bg-transparent max-h-[55vh]">
+                    <div class="space-y-2">
+                        <h3 class="text-xs sm:text-sm font-black text-zinc-800 uppercase tracking-wider font-mono border-b border-zinc-200/60 pb-1">1. Casting the Line</h3>
+                        <p class="text-[10px] sm:text-xs text-zinc-650 font-mono leading-relaxed">
+                            Click and drag anywhere on the screen (or swipe and hold on touchscreens) to pull the rod back. A transparent aiming sector will show the launch cone. Release your input to cast the hook out.
+                        </p>
+                    </div>
+
+                    <div class="space-y-2">
+                        <h3 class="text-xs sm:text-sm font-black text-zinc-800 uppercase tracking-wider font-mono border-b border-zinc-200/60 pb-1">2. Winding & Line Tension</h3>
+                        <p class="text-[10px] sm:text-xs text-zinc-650 font-mono leading-relaxed">
+                            Once an animal bites, reel them in by rhythmically alternating inputs. Press <span class="border border-zinc-300 px-1.5 py-0.5 rounded bg-zinc-100 text-zinc-800">Left (L)</span> and <span class="border border-zinc-300 px-1.5 py-0.5 rounded bg-zinc-100 text-zinc-800">Right (R)</span> controls (or use keys: <span class="border border-zinc-300 px-1.5 py-0.5 rounded bg-zinc-100 text-zinc-800">A / D</span>, <span class="border border-zinc-300 px-1.5 py-0.5 rounded bg-zinc-100 text-zinc-800">Ctrl L / R</span>, or <span class="border border-zinc-300 px-1.5 py-0.5 rounded bg-zinc-100 text-zinc-800">Arrow Left / Right</span>).
+                        </p>
+                        <p class="text-[10px] sm:text-xs text-zinc-550 font-mono leading-relaxed">
+                            Avoid entering the Red Zone to prevent the hook line from snapping. Do not let tension drop to zero, or the animal will escape on a slack line!
+                        </p>
+                    </div>
+
+                    <div class="space-y-2">
+                        <h3 class="text-xs sm:text-sm font-black text-zinc-800 uppercase tracking-wider font-mono border-b border-zinc-200/60 pb-1">3. Deep Sea & Skies</h3>
+                        <p class="text-[10px] sm:text-xs text-zinc-650 font-mono leading-relaxed">
+                            Sinking deeper reveals massive, highly valuable species. Keep an eye out for birds hovering high in the air above, and search thousands of meters deep to find mythical behemoths.
+                        </p>
+                    </div>
+
+                    <div class="space-y-2">
+                        <h3 class="text-xs sm:text-sm font-black text-zinc-800 uppercase tracking-wider font-mono border-b border-zinc-200/60 pb-1">4. Cargo Limits & Ships</h3>
+                        <p class="text-[10px] sm:text-xs text-zinc-650 font-mono leading-relaxed">
+                            Each boat type has a maximum capacity limit. Exceeding this limit strains the hull—your next heavy catch may crack the vessel entirely! Sell your catches at the Marketplace to upgrade gear.
+                        </p>
+                    </div>
+                </div>
+                
+                <div class="p-4 border-t border-zinc-200/60 flex justify-end px-4 sm:px-8">
+                    <button id="guide-understand-btn" class="px-6 py-2 border border-zinc-300 hover:bg-zinc-900 hover:text-white text-zinc-850 rounded-full text-[10px] sm:text-xs font-black tracking-widest uppercase transition-colors font-mono cursor-pointer">
+                        Understand
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Unified Endgame Overlay -->
+        <div id="endgame-container" class="hidden opacity-0 absolute inset-0 z-[200] flex flex-col items-center justify-center bg-black/95 backdrop-blur-md p-6 text-white text-center transition-opacity duration-1000">
+            <div id="hookless-phase" class="flex flex-col items-center justify-center transition-opacity duration-500">
+                <h2 class="text-4xl sm:text-6xl text-white tracking-widest uppercase font-mono animate-pulse">Hookless</h2>
+            </div>
+            
+            <div id="boatless-phase" class="hidden flex flex-col items-center justify-center transition-opacity duration-500">
+                <h2 class="text-4xl sm:text-6xl text-white tracking-widest uppercase font-mono animate-pulse">Boatless</h2>
+            </div>
+
+            <div id="summary-phase" class="hidden opacity-0 bg-zinc-950/40 backdrop-blur-md border border-white/10 w-full max-w-md p-6 sm:p-8 rounded-3xl flex flex-col items-center gap-5 shadow-none text-white font-mono transition-opacity duration-500">
+                <div>
+                    <h2 class="text-2xl sm:text-3xl font-black tracking-widest uppercase mb-1">EXPEDITION REPORT</h2>
+                    <p class="text-white/40 text-[9px] sm:text-[10px] tracking-widest uppercase">Summary of your journey</p>
+                </div>
+                
+                <div class="w-full flex justify-around border-y border-white/10 py-4">
+                    <div class="text-center">
+                        <div class="text-white/40 text-[9px] uppercase tracking-wider mb-1">Total Cash</div>
+                        <div class="text-xl sm:text-2xl font-bold text-white">$<span id="summary-money">0</span></div>
+                    </div>
+                    <div class="text-center border-l border-white/10 pl-8">
+                        <div class="text-white/40 text-[9px] uppercase tracking-wider mb-1">Catches</div>
+                        <div class="text-xl sm:text-2xl font-bold text-white"><span id="summary-count">0</span></div>
+                    </div>
+                </div>
+
+                <div class="w-full text-left">
+                    <h3 class="text-xs font-bold uppercase tracking-widest text-white/50 mb-3">All Catches</h3>
+                    <div id="summary-catch-list" class="space-y-2 max-h-[160px] overflow-y-auto custom-scrollbar pr-1"></div>
+                </div>
+
+                <div class="flex items-center gap-3 justify-center min-h-[48px]" id="restart-btn-container">
+                    <!-- Standard single restart button -->
+                    <button id="summary-restart-btn" class="p-4 bg-white hover:bg-zinc-200 text-black rounded-full transition-all active:scale-95 shadow-none flex items-center justify-center w-12 h-12 cursor-pointer" title="Set Sail Again">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99"></path>
+                        </svg>
+                    </button>
+                    <!-- Confirmation Split Buttons (hidden initially) -->
+                    <div id="restart-split-container" class="hidden flex items-center gap-3">
+                        <!-- Cancel button (X mark) -->
+                        <button id="restart-confirm-cancel-btn" class="p-3 bg-zinc-850 hover:bg-zinc-800 border border-white/10 text-white rounded-full transition-all active:scale-95 shadow-none flex items-center justify-center w-12 h-12 cursor-pointer" title="Cancel Reset">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12"></path>
+                            </svg>
+                        </button>
+                        <!-- Confirm button (Check mark) -->
+                        <button id="restart-confirm-ok-btn" class="p-3 bg-red-600 hover:bg-red-700 text-white rounded-full transition-all active:scale-95 shadow-none flex items-center justify-center w-12 h-12 cursor-pointer animate-pulse" title="Confirm Reset & Abandon Voyage">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5"></path>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Depth Indicator -->
+        <div id="depth-hud" class="hidden absolute right-6 top-1/2 transform -translate-y-1/2 h-[45vh] sm:h-[50vh] min-h-[250px] sm:min-h-[300px] flex items-center pointer-events-none z-50 transition-opacity duration-1000 select-none">
+            <div class="mr-4 text-right">
+                <span id="persistent-depth" class="font-bold text-xl sm:text-3xl text-white font-mono">0</span><span class="text-xs ml-0.5 text-white/50 font-mono">m</span>
+            </div>
+            
+            <div class="relative w-[2px] h-full flex flex-col justify-between items-center py-2">
+                <div id="depth-dot-line" class="absolute inset-y-0 left-0 w-[2px] h-full" style="background-image: radial-gradient(circle, rgba(255,255,255,0.2) 1px, transparent 1px); background-size: 2px 5px;"></div>
+                <div class="absolute top-1/2 -left-[3px] -translate-y-1/2 w-2 h-2 rounded-full border border-white bg-transparent z-10"></div>
+            </div>
+        </div>
+
+        <!-- Developer Command Console -->
+        <div id="dev-console" class="hidden fixed top-10 left-1/2 -translate-x-1/2 w-[90%] max-w-sm bg-black/50 backdrop-blur-md border border-white/20 p-4 rounded-xl z-[200] flex flex-col gap-2 font-mono text-white shadow-[0_0_35px_rgba(255,255,255,0.1)] pointer-events-auto">
+            <div class="text-[9px] text-white/40 uppercase tracking-widest mb-1">Developer Mode</div>
+            <input id="console-input" type="text" placeholder="" class="bg-transparent border-b border-white outline-none py-1 text-white placeholder-white/25 text-xs sm:text-sm" />
+            <div class="text-[8px] text-white/30">Press Esc to cancel.</div>
+        </div>
+
+        <!-- Webcam Trophy Photo Modal -->
+        <div id="photo-modal" class="hidden fixed inset-0 z-[150] flex items-center justify-center bg-black/95 backdrop-blur-md p-3 sm:p-4 opacity-0 pointer-events-none transition-all duration-300">
+            <div id="photo-modal-content" class="bg-zinc-950/40 backdrop-blur-md border border-white/20 w-full max-w-xl rounded-3xl overflow-hidden flex flex-col p-4 sm:p-6 shadow-[0_0_50px_rgba(255,255,255,0.1)] pointer-events-auto text-white transform scale-95 transition-all duration-300">
+                <div class="mb-3 sm:mb-4 text-center">
+                    <h2 class="text-xl sm:text-2xl font-black text-white tracking-tighter uppercase font-sans">TROPHY PICTURE BOOTH</h2>
+                    <p id="photo-status" class="text-white/50 text-[9px] sm:text-xs font-bold uppercase tracking-widest mt-1 font-mono">Initializing camera...</p>
+                </div>
+
+                <div class="relative w-full aspect-video bg-zinc-900 rounded-2xl overflow-hidden shadow-inner mb-4 sm:mb-6 flex items-center justify-center">
+                    <video id="webcam-video" autoplay playsinline style="display: none;"></video>
+                    
+                    <!-- Animated Loading Placeholder -->
+                    <div id="photo-skeleton" class="absolute inset-0 flex flex-col items-center justify-center bg-zinc-950 text-white z-10 pointer-none font-sans">
+                        <div class="w-12 h-12 rounded-full border-4 border-white/10 border-t-white animate-spin mb-4 font-sans"></div>
+                        <div class="text-xs sm:text-sm font-mono tracking-widest text-white/70 animate-pulse uppercase">SYSTEM INITIALIZING WEBCAM</div>
+                        <div class="text-[10px] text-white/30 mt-1.5 uppercase tracking-wider font-sans">Please authorize camera access if prompted</div>
+                    </div>
+
+                    <canvas id="photo-canvas" class="max-w-full max-h-full object-contain"></canvas>
+                </div>
+
+                <div class="flex justify-center gap-3 sm:gap-4">
+                    <button id="btn-snap" class="px-6 py-2.5 sm:px-8 sm:py-3 bg-white hover:bg-zinc-200 text-black rounded-full text-xs sm:text-sm font-black tracking-widest uppercase transition-all shadow-[0_0_15px_rgba(255,255,255,0.15)] active:scale-95 cursor-pointer">
+                        Capture Photo
+                    </button>
+                    <button id="close-photo" class="px-5 py-2.5 sm:px-6 sm:py-3 border border-white/20 hover:bg-white hover:text-black rounded-full text-xs sm:text-sm font-black tracking-widest uppercase transition-all active:scale-95 cursor-pointer">
+                        Cancel
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Import all modules sequentially for pure HTML/JS execution -->
+    <script src="src/gameState.js"></script>
+    <script src="src/gameData.js"></script>
+    <script src="src/audio.js"></script>
+    <script src="src/particles.js"></script>
+    <script src="src/fish.js"></script>
+    <script src="src/gameEngine.js"></script>
+    <script src="src/main.js"></script>
+  </body>
+</html>
