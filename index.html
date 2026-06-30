@@ -1,0 +1,289 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>The Fisherman - Immersive Edition</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <div id="cursor-dot" class="cursor-dot"></div>
+    <canvas id="gameCanvas" style="display: block;"></canvas>
+
+    <div id="ui-layer" class="ui-layer-transition">
+        <!-- Floating UI Navigation -->
+        <div id="nav-hud" class="hidden nav-hud-class">
+            <button id="btn-open-guide" title="Fishing Guide">
+                ?
+            </button>
+            <button id="btn-open-store">
+                Marketplace
+            </button>
+            <button id="btn-open-collection">
+                My Bucket (0/5)
+            </button>
+        </div>
+
+        <!-- Touch Drum Controller -->
+        <div id="drum-controller" class="hidden">
+            <button id="btn-drum-left">
+                <span class="drum-span-bold">L</span>
+                <span class="drum-span-sub">A / Ctrl</span>
+            </button>
+            <button id="btn-drum-right">
+                <span class="drum-span-bold">R</span>
+                <span class="drum-span-sub">D / Ctrl</span>
+            </button>
+        </div>
+
+        <!-- Telemetry Signal Box -->
+        <div id="message-box" class="hidden">
+            <span id="msg-meta">Telemetry Signal</span>
+            <span id="msg-text">NOTIFICATION LOG</span>
+        </div>
+
+        <!-- Watermark -->
+        <div id="watermark" class="opacity-0">
+            Made by Vincent L
+        </div>
+
+        <!-- Hidden components keeping telemetry alive -->
+        <div id="hud-panel" class="hidden">
+            <span id="player-money-display">0</span>
+            <span id="player-hooks-display">10</span>
+        </div>
+
+        <!-- Catch Collection Modal -->
+        <div id="collection-modal" class="hidden opacity-0 pointer-events-none">
+            <div id="collection-modal-content">
+                <div class="modal-header">
+                    <div>
+                        <h2 class="modal-title">YOUR BUCKET</h2>
+                        <p class="modal-subtitle">Select caught animals to sell for cash or take photos</p>
+                    </div>
+                    <div class="modal-header-actions">
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <span style="color: #a1a1aa; font-size: 10px; font-weight: bold; text-transform: uppercase; font-family: monospace;">Sort:</span>
+                            <select id="bucket-sort-select" class="modal-select">
+                                <option value="newest">Newest First</option>
+                                <option value="oldest">Oldest First</option>
+                                <option value="size_desc">Largest First</option>
+                                <option value="rarity_desc">Rarest First</option>
+                                <option value="value_desc">Most Valuable</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="modal-body space-y-6 custom-scrollbar">
+                    <div id="collection-list" class="modal-grid"></div>
+
+                    <div style="border-top: 1px solid rgba(228, 228, 231, 0.6); padding-top: 24px;">
+                        <h3 class="modal-section-title">My Fishing Badges</h3>
+                        <div id="badges-grid" class="modal-grid"></div>
+                    </div>
+                </div>
+
+                <div class="modal-footer">
+                    <span id="collection-count" class="modal-footer-text">TOTAL: 0 / 5 FISH</span>
+                    <button id="sell-all-btn" class="btn-modal-action">Sell Entire Catch</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Marketplace Modal -->
+        <div id="store-modal" class="hidden opacity-0 pointer-events-none">
+            <div id="store-modal-content">
+                <div class="modal-header">
+                    <div>
+                        <h2 class="modal-title">MARKETPLACE</h2>
+                        <p class="modal-subtitle">Upgrade your gear and purchase supplies</p>
+                    </div>
+                    <div class="modal-header-actions">
+                        <div class="store-balance-container">
+                            <div class="store-balance-label">Balance</div>
+                            <div class="store-balance-value">$<span id="store-money-display">0</span></div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div id="store-list" class="modal-body custom-scrollbar" style="display: flex; flex-direction: column; gap: 24px;"></div>
+            </div>
+        </div>
+
+        <!-- Fishing Guide Modal -->
+        <div id="guide-modal" class="hidden opacity-0 pointer-events-none">
+            <div id="guide-modal-content">
+                <div class="modal-header">
+                    <div>
+                        <h2 class="modal-title">FISHING GUIDE</h2>
+                        <p class="modal-subtitle">Controls & Exploration Mechanics</p>
+                    </div>
+                </div>
+                
+                <div class="modal-body custom-scrollbar" style="max-height: 55vh; display: flex; flex-direction: column; gap: 24px;">
+                    <div style="display: flex; flex-direction: column; gap: 8px;">
+                        <h3 style="font-size: 13px; font-weight: 900; color: #27272a; text-transform: uppercase; letter-spacing: 0.05em; font-family: monospace; border-bottom: 1px solid rgba(228, 228, 231, 0.6); padding-bottom: 4px; margin: 0;">1. Casting the Line</h3>
+                        <p style="font-size: 11px; color: #52525b; font-family: monospace; line-height: 1.5; margin: 0;">
+                            Click and drag anywhere on the screen (or swipe and hold on touchscreens) to pull the rod back. A transparent aiming sector will show the launch cone. Release your input to cast the hook out.
+                        </p>
+                    </div>
+
+                    <div style="display: flex; flex-direction: column; gap: 8px;">
+                        <h3 style="font-size: 13px; font-weight: 900; color: #27272a; text-transform: uppercase; letter-spacing: 0.05em; font-family: monospace; border-bottom: 1px solid rgba(228, 228, 231, 0.6); padding-bottom: 4px; margin: 0;">2. Winding & Line Tension</h3>
+                        <p style="font-size: 11px; color: #52525b; font-family: monospace; line-height: 1.5; margin: 0;">
+                            Once an animal bites, reel them in by rhythmically alternating inputs. Press <span style="border: 1px solid #d4d4d8; padding: 2px 6px; border-radius: 4px; background-color: #f4f4f5; color: #18181b;">Left (L)</span> and <span style="border: 1px solid #d4d4d8; padding: 2px 6px; border-radius: 4px; background-color: #f4f4f5; color: #18181b;">Right (R)</span> controls (or use keys: <span style="border: 1px solid #d4d4d8; padding: 2px 6px; border-radius: 4px; background-color: #f4f4f5; color: #18181b;">A / D</span>, <span style="border: 1px solid #d4d4d8; padding: 2px 6px; border-radius: 4px; background-color: #f4f4f5; color: #18181b;">Ctrl L / R</span>, or <span style="border: 1px solid #d4d4d8; padding: 2px 6px; border-radius: 4px; background-color: #f4f4f5; color: #18181b;">Arrow Left / Right</span>).
+                        </p>
+                        <p style="font-size: 11px; color: #71717a; font-family: monospace; line-height: 1.5; margin: 0;">
+                            Avoid entering the Red Zone to prevent the hook line from snapping. Do not let tension drop to zero, or the animal will escape on a slack line!
+                        </p>
+                    </div>
+
+                    <div style="display: flex; flex-direction: column; gap: 8px;">
+                        <h3 style="font-size: 13px; font-weight: 900; color: #27272a; text-transform: uppercase; letter-spacing: 0.05em; font-family: monospace; border-bottom: 1px solid rgba(228, 228, 231, 0.6); padding-bottom: 4px; margin: 0;">3. Deep Sea & Skies</h3>
+                        <p style="font-size: 11px; color: #52525b; font-family: monospace; line-height: 1.5; margin: 0;">
+                            Sinking deeper reveals massive, highly valuable species. Keep an eye out for birds hovering high in the air above, and search thousands of meters deep to find mythical behemoths.
+                        </p>
+                    </div>
+
+                    <div style="display: flex; flex-direction: column; gap: 8px;">
+                        <h3 style="font-size: 13px; font-weight: 900; color: #27272a; text-transform: uppercase; letter-spacing: 0.05em; font-family: monospace; border-bottom: 1px solid rgba(228, 228, 231, 0.6); padding-bottom: 4px; margin: 0;">4. Cargo Limits & Ships</h3>
+                        <p style="font-size: 11px; color: #52525b; font-family: monospace; line-height: 1.5; margin: 0;">
+                            Each boat type has a maximum capacity limit. Exceeding this limit strains the hull—your next heavy catch may crack the vessel entirely! Sell your catches at the Marketplace to upgrade gear.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Unified Endgame Overlay -->
+        <div id="endgame-container" class="hidden opacity-0">
+            <div id="hookless-phase" class="endgame-phase-container">
+                <h2 class="endgame-phase-title">Hookless</h2>
+            </div>
+            
+            <div id="boatless-phase" class="endgame-phase-container hidden">
+                <h2 class="endgame-phase-title">Boatless</h2>
+            </div>
+
+            <div id="summary-phase" class="hidden opacity-0">
+                <div>
+                    <h2 class="summary-title">EXPEDITION REPORT</h2>
+                    <p class="summary-subtitle">Summary of your journey</p>
+                </div>
+                
+                <div class="summary-stats-bar">
+                    <div class="summary-stat-box">
+                        <div class="summary-stat-label">Total Cash</div>
+                        <div class="summary-stat-val">$<span id="summary-money">0</span></div>
+                    </div>
+                    <div class="summary-stat-box divider">
+                        <div class="summary-stat-label">Catches</div>
+                        <div class="summary-stat-val"><span id="summary-count">0</span></div>
+                    </div>
+                </div>
+
+                <div class="summary-catches-list-container">
+                    <h3 class="summary-catches-title">All Catches</h3>
+                    <div id="summary-catch-list"></div>
+                </div>
+
+                <div id="restart-btn-container">
+                    <button id="summary-restart-btn" title="Set Sail Again">
+                        <svg style="width: 24px; height: 24px;" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99"></path>
+                        </svg>
+                    </button>
+                    <div id="restart-split-container" class="hidden">
+                        <button id="restart-confirm-cancel-btn" title="Cancel Reset">
+                            <svg style="width: 20px; height: 20px;" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"></path>
+                            </svg>
+                        </button>
+                        <button id="restart-confirm-ok-btn" title="Confirm Reset & Abandon Voyage">
+                            <svg style="width: 20px; height: 20px;" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"></path>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Depth Indicator -->
+        <div id="depth-hud" class="hidden">
+            <div class="depth-text-container">
+                <span id="persistent-depth">0</span><span class="depth-unit">m</span>
+            </div>
+            
+            <div class="depth-bar-container">
+                <div id="depth-dot-line"></div>
+                <div class="depth-cursor-circle"></div>
+            </div>
+        </div>
+
+        <!-- Developer Command Console -->
+        <div id="dev-console" class="hidden">
+            <div class="dev-console-header">Developer Mode</div>
+            <input id="console-input" type="text" placeholder="" />
+            <div class="dev-console-footer">Press Esc to cancel.</div>
+        </div>
+
+        <!-- Webcam Trophy Photo Modal -->
+        <div id="photo-modal" class="hidden opacity-0 pointer-events-none">
+            <div id="photo-modal-content">
+                <div class="photo-header-container">
+                    <h2 class="photo-modal-title">TROPHY PICTURE BOOTH</h2>
+                    <p id="photo-status">Initializing camera...</p>
+                </div>
+
+                <div class="photo-video-wrapper">
+                    <video id="webcam-video" autoplay playsinline style="display: none;"></video>
+                    
+                    <!-- Animated Loading Placeholder -->
+                    <div id="photo-skeleton">
+                        <div class="animate-spin"></div>
+                        <div class="skeleton-text-main">SYSTEM INITIALIZING WEBCAM</div>
+                        <div class="skeleton-text-sub">Please authorize camera access if prompted</div>
+                    </div>
+
+                    <canvas id="photo-canvas"></canvas>
+                </div>
+
+                <div class="photo-controls-row">
+                    <button id="photo-control-move" class="btn-photo-control active">
+                        <svg xmlns="http://www.w3.org/2000/svg" style="width: 14px; height: 14px; display: inline-block;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 9l-3 3 3 3M9 5l3-3 3 3M15 19l-3 3-3-3M19 9l3 3-3 3M2 12h20M12 2v20"/></svg>
+                        MOVE
+                    </button>
+                    <button id="photo-control-rotate" class="btn-photo-control">
+                        <svg xmlns="http://www.w3.org/2000/svg" style="width: 14px; height: 14px; display: inline-block;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+                        ROTATE
+                    </button>
+                    <button id="photo-control-scale" class="btn-photo-control">
+                        <svg xmlns="http://www.w3.org/2000/svg" style="width: 14px; height: 14px; display: inline-block;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 14h6v6M20 10h-6V4M14 10l7-7M10 14l-7 7"/></svg>
+                        SCALE
+                    </button>
+                </div>
+
+                <div class="photo-buttons-row">
+                    <button id="btn-snap" class="btn-photo-action primary">
+                        Capture Photo
+                    </button>
+                    <button id="close-photo" class="btn-photo-action secondary">
+                        Cancel
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Import all modules sequentially for pure HTML/JS execution -->
+    <script src="src/gameState.js"></script>
+    <script src="src/gameData.js"></script>
+    <script src="src/audio.js"></script>
+    <script src="src/particles.js"></script>
+    <script src="src/fish.js"></script>
+    <script src="src/gameEngine.js"></script>
+    <script src="src/main.js"></script>
+  </body>
+</html>
