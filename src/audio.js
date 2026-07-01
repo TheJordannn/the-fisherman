@@ -143,6 +143,21 @@ const AudioManager = window.AudioManager = {
         osc.stop(this.ctx.currentTime + 0.02);
     },
 
+    playRopeTick() {
+        if (!this.ctx) return;
+        let osc = this.ctx.createOscillator();
+        let gain = this.ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(2400, this.ctx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(800, this.ctx.currentTime + 0.012);
+        gain.gain.setValueAtTime(0.05, this.ctx.currentTime); 
+        gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.012);
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start();
+        osc.stop(this.ctx.currentTime + 0.015);
+    },
+
     playWarning(tension) {
         if (!this.ctx) return;
         let interval = tension > 88 ? 160 : 350; 

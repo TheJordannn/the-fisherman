@@ -361,6 +361,10 @@ function resampleRopePoints(newCount) {
     }
     if (oldCount === newCount) return;
     
+    if (typeof AudioManager !== 'undefined' && AudioManager.playRopeTick) {
+        AudioManager.playRopeTick();
+    }
+    
     if (newCount > oldCount) {
         let diff = newCount - oldCount;
         let p0 = state.ropePoints[0];
@@ -751,7 +755,8 @@ function updatePhysics() {
     let totalDist = Math.sqrt(dxTotal*dxTotal + dyTotal*dyTotal);
     
     // Dynamically adjust rope vertex points to stay close and consistent at any depth
-    let desiredPoints = Math.min(300, Math.max(60, Math.floor(totalDist / 15) + 1));
+    // Keeping a consistent distance between vertices throughout (no minimum threshold of 60 points)
+    let desiredPoints = Math.min(350, Math.max(8, Math.floor(totalDist / 12) + 1));
     resampleRopePoints(desiredPoints);
     
     let numRopeSegments = state.ropePoints.length - 1;
@@ -983,7 +988,8 @@ function gameLoop(timestamp) {
     }
 
     if (state.ropePoints[0] && state.ropePoints[0].x === 0 && state.ropePoints[0].y === 0) {
-        for (let i = 0; i < 60; i++) { // numRopeSegments = 60
+        let ropeCount = state.ropePoints.length;
+        for (let i = 0; i < ropeCount; i++) {
             state.ropePoints[i].x = state.rodTip.x;
             state.ropePoints[i].y = state.rodTip.y;
             state.ropePoints[i].old_x = state.rodTip.x;
