@@ -38,7 +38,8 @@ class RainParticle {
 class AmbientParticle {
     constructor() {
         this.x = Math.random() * 4000 - 1000;
-        this.y = 400 + Math.random() * (5600 - 400); // waterSurfaceY = 400, maxDepth = 5600
+        let maxD = state.isTutorialMode ? 900 : 5600;
+        this.y = 400 + Math.random() * (maxD - 400); // waterSurfaceY = 400, maxDepth = 5600
         this.size = Math.random() * 2 + 0.5;
         this.vy = -Math.random() * 0.8 - 0.1;
         this.phase = Math.random() * Math.PI * 2;
@@ -47,8 +48,9 @@ class AmbientParticle {
     update() {
         this.y += this.vy;
         this.x += Math.sin(Date.now() / 1000 + this.phase) * 0.4;
+        let maxD = state.isTutorialMode ? 900 : 5600;
         if (this.y < 400) {
-            this.y = 5600; 
+            this.y = maxD; 
             this.x = state.cameraX + Math.random() * state.logicalWidth * 2 - state.logicalWidth / 2;
         }
     }

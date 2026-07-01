@@ -93,11 +93,19 @@ function initializeCreatures() {
     state.fishList = [];
     state.assignedFishLanes = Array.from({ length: 50 }, (_, i) => i);
     state.assignedBirdLanes = Array.from({ length: 4 }, (_, i) => i);
-    for(let i=0; i<40; i++) state.fishList.push(new Fish(false));
-    for(let i=0; i<5; i++) {
-        let bird = new Fish(true);
-        bird.x = Math.random() > 0.5 ? state.cameraX - 800 - Math.random() * 800 : state.cameraX + state.logicalWidth + 800 + Math.random() * 800;
-        state.fishList.push(bird);
+    if (state.isTutorialMode) {
+        let fish = new Fish(false);
+        fish.x = state.logicalWidth / 2;
+        fish.y = 400 + 150;
+        fish.vx = fish.speed;
+        state.fishList.push(fish);
+    } else {
+        for(let i=0; i<40; i++) state.fishList.push(new Fish(false));
+        for(let i=0; i<5; i++) {
+            let bird = new Fish(true);
+            bird.x = Math.random() > 0.5 ? state.cameraX - 800 - Math.random() * 800 : state.cameraX + state.logicalWidth + 800 + Math.random() * 800;
+            state.fishList.push(bird);
+        }
     }
 }
 
@@ -116,6 +124,10 @@ function resetHook() {
     state.hook.x = targetX;
     state.hook.y = targetY;
 
+    state.ropePoints = [];
+    for (let i = 0; i < 60; i++) {
+        state.ropePoints.push({x:0, y:0, old_x:0, old_y:0});
+    }
     for (let i = 0; i < 60; i++) { // numRopeSegments = 60
         let lerpFactor = i / 59;
         state.ropePoints[i].x = state.rodTip.x + (state.hook.x - state.rodTip.x) * lerpFactor;
@@ -160,12 +172,19 @@ function speakPhrase(text) {
 }
 
 function checkGameOver() {
+    if (state.isTutorialMode) return;
     if (state.playerHooks <= 0 && state.playerMoney < 10 && state.caughtFishStack.length === 0) {
         triggerEndgame('hookless');
     }
 }
 
 function loseHook() {
+    if (state.isTutorialMode) {
+        state.playerHooks = 10;
+        const hooksDisplay = document.getElementById('player-hooks-display');
+        if (hooksDisplay) hooksDisplay.textContent = state.playerHooks;
+        return;
+    }
     state.playerHooks = Math.max(0, state.playerHooks - 1);
     const hooksDisplay = document.getElementById('player-hooks-display');
     if (hooksDisplay) hooksDisplay.textContent = state.playerHooks;
@@ -237,9 +256,9 @@ function triggerEndgame(type = 'hookless') {
         }
 
         summaryPhase.style.opacity = '0';
-        summaryPhase.classList.add('hidden');
+        summaryPhase.classList.add('hidden', 'opacity-0');
 
-        endgameContainer.classList.remove('hidden');
+        endgameContainer.classList.remove('hidden', 'opacity-0');
         endgameContainer.style.opacity = '0';
         void endgameContainer.offsetWidth; 
         endgameContainer.style.transition = 'opacity 1.0s ease-in-out';
@@ -279,7 +298,7 @@ function triggerEndgame(type = 'hookless') {
                     });
                 }
 
-                summaryPhase.classList.remove('hidden');
+                summaryPhase.classList.remove('hidden', 'opacity-0');
                 void summaryPhase.offsetWidth; 
                 summaryPhase.style.transition = 'opacity 0.8s ease-in-out';
                 summaryPhase.style.opacity = '1';
@@ -329,6 +348,39 @@ function showMessage(text, styleContext = "default", duration = 200) {
     msgMeta.textContent = metaLabel;
     messageBox.classList.remove('hidden');
     state.msgTimer = duration;
+}
+
+function resampleRopePoints(newCount) {
+    let oldCount = state.ropePoints.length;
+    if (oldCount === 0) {
+        state.ropePoints = [];
+        for (let i = 0; i < newCount; i++) {
+            state.ropePoints.push({ x: state.rodTip.x, y: state.rodTip.y, old_x: state.rodTip.x, old_y: state.rodTip.y });
+        }
+        return;
+    }
+    if (oldCount === newCount) return;
+    
+    if (newCount > oldCount) {
+        let diff = newCount - oldCount;
+        let p0 = state.ropePoints[0];
+        let p1 = state.ropePoints[1] || p0;
+        
+        let inserted = [];
+        for (let i = 1; i <= diff; i++) {
+            let t = i / (diff + 1);
+            inserted.push({
+                x: p0.x + (p1.x - p0.x) * t,
+                y: p0.y + (p1.y - p0.y) * t,
+                old_x: p0.old_x + (p1.old_x - p0.old_x) * t,
+                old_y: p0.old_y + (p1.old_y - p0.old_y) * t
+            });
+        }
+        state.ropePoints.splice(1, 0, ...inserted);
+    } else if (newCount < oldCount) {
+        let diff = oldCount - newCount;
+        state.ropePoints.splice(1, diff);
+    }
 }
 
 function updatePhysics() {
@@ -403,8 +455,9 @@ function updatePhysics() {
             state.hook.vy *= 0.99;
         }
 
-        if (state.hook.y >= 5600) { // maxDepth = 5600
-            state.hook.y = 5600;
+        let maxD = state.isTutorialMode ? 900 : 5600;
+        if (state.hook.y >= maxD) { // maxDepth = 5600
+            state.hook.y = maxD;
             state.hook.vy *= 0.5; 
             state.hook.vx *= 0.8; 
         }
@@ -414,7 +467,7 @@ function updatePhysics() {
             state.hook.vy = 0;
         }
 
-        if (state.hook.x < state.cameraX - 1200 || state.hook.x > state.cameraX + state.logicalWidth + 1200 || state.hook.y > 5600 + 200) {
+        if (state.hook.x < state.cameraX - 1200 || state.hook.x > state.cameraX + state.logicalWidth + 1200 || state.hook.y > maxD + 200) {
             resetHook();
         }
 
@@ -486,7 +539,7 @@ function updatePhysics() {
                 AudioManager.playWarning(state.lineTension);
             }
 
-            if (state.lineTension > 100) { // MAX_TENSION = 100
+             if (state.lineTension > 100) { // MAX_TENSION = 100
                 showMessage("SNAP! Tension exceeded. " + state.hookedFish.name + " broke the line!", "danger");
                 AudioManager.playSnap();
                 createParticles(state.hook.x, state.hook.y, '#ffffff', 20);
@@ -500,6 +553,13 @@ function updatePhysics() {
                 createBrokenHook(state.hook.x, state.hook.y, state.hook.vx, state.hook.vy);
                 loseHook();
                 resetHook(); 
+
+                if (state.isTutorialMode && state.tutorialStep === 7) {
+                    showMessage("The line snapped! Cast and try again.", "danger");
+                    state.spawnedExhaustionFish = false;
+                    state.tutorialStep = 4;
+                    state.exhaustionSucceeded = false;
+                }
             } else if (state.lineTension <= 0) {
                 state.lineTension = 0;
                 state.slackTimer++;
@@ -513,6 +573,13 @@ function updatePhysics() {
                         state.hookedFish.vy = 0.6; 
                     }
                     resetHook();
+
+                    if (state.isTutorialMode && state.tutorialStep === 7) {
+                        showMessage("The fish escaped! Cast and try again.", "danger");
+                        state.spawnedExhaustionFish = false;
+                        state.tutorialStep = 4;
+                        state.exhaustionSucceeded = false;
+                    }
                 }
             } else {
                 state.slackTimer = 0;
@@ -532,11 +599,26 @@ function updatePhysics() {
                 createBrokenHook(state.hook.x, state.hook.y, state.hook.vx, state.hook.vy);
                 loseHook();
                 resetHook(); 
+
+                if (state.isTutorialMode && state.tutorialStep === 7) {
+                    showMessage("The line snapped! Cast and try again.", "danger");
+                    state.spawnedExhaustionFish = false;
+                    state.tutorialStep = 4;
+                    state.exhaustionSucceeded = false;
+                }
                 return;
             }
             
             let distToRod = Math.sqrt((state.hook.x - state.rodTip.x)**2 + (state.hook.y - state.rodTip.y)**2);
             if (state.gameState === 'REELING' && distToRod < 45) {
+                if (state.isTutorialMode && state.tutorialStep === 7) {
+                    showMessage("You caught the fish without exhausting it! Cast and try again.", "danger");
+                    state.spawnedExhaustionFish = false;
+                    state.tutorialStep = 4;
+                    state.exhaustionSucceeded = false;
+                    resetHook();
+                    return;
+                }
                 const currentBoat = storeInventory.boatTypes.find(b => b.id === state.playerEquipment.boatType);
                 const maxCap = currentBoat ? currentBoat.capacity : 5;
                 
@@ -629,7 +711,9 @@ function updatePhysics() {
                         freeLaneIndex(state.hookedFish.isBird, state.hookedFish.laneIndex);
                     }
                     state.fishList.splice(state.fishList.indexOf(state.hookedFish), 1);
-                    state.fishList.push(new Fish(caughtIsBird)); 
+                    if (!state.isTutorialMode) {
+                        state.fishList.push(new Fish(caughtIsBird)); 
+                    }
                     resetHook();
                 }
             }
@@ -666,14 +750,19 @@ function updatePhysics() {
     let dyTotal = endPoint.y - startPoint.y;
     let totalDist = Math.sqrt(dxTotal*dxTotal + dyTotal*dyTotal);
     
+    // Dynamically adjust rope vertex points to stay close and consistent at any depth
+    let desiredPoints = Math.min(300, Math.max(60, Math.floor(totalDist / 15) + 1));
+    resampleRopePoints(desiredPoints);
+    
+    let numRopeSegments = state.ropePoints.length - 1;
     let slackMultiplier = (state.gameState === 'REELING' ? 1.02 : 1.15);
-    let targetLength = (totalDist / 59) * slackMultiplier; // numRopeSegments - 1 = 59
+    let targetLength = (totalDist / numRopeSegments) * slackMultiplier;
     if (targetLength < 1) targetLength = 1;
 
-    for(let i = 1; i < 59; i++) { // numRopeSegments - 1 = 59
+    for(let i = 1; i < numRopeSegments; i++) { 
         let p = state.ropePoints[i];
         if (state.gameState === 'IDLE' || state.gameState === 'HOME' || state.gameState === 'INTRO' || state.gameState === 'PULLING') {
-            let rFactor = i / 59;
+            let rFactor = i / numRopeSegments;
             p.x = startPoint.x + (endPoint.x - startPoint.x) * rFactor;
             p.y = startPoint.y + (endPoint.y - startPoint.y) * rFactor;
             p.old_x = p.x;
@@ -691,8 +780,9 @@ function updatePhysics() {
                 p.y += vy + 0.6; 
             }
             
-            if (p.y >= 5600) { // maxDepth = 5600
-                p.y = 5600; p.old_y = 5600; 
+            let maxD = state.isTutorialMode ? 900 : 5600;
+            if (p.y >= maxD) { // maxDepth = 5600
+                p.y = maxD; p.old_y = maxD; 
                 vx *= 0.5; 
             }
             p.x += vx;
@@ -700,19 +790,20 @@ function updatePhysics() {
     }
 
     state.ropePoints[0].x = startPoint.x; state.ropePoints[0].y = startPoint.y;
-    state.ropePoints[59].x = endPoint.x; state.ropePoints[59].y = endPoint.y; // numRopeSegments - 1 = 59
+    state.ropePoints[numRopeSegments].x = endPoint.x; state.ropePoints[numRopeSegments].y = endPoint.y;
 
     if (state.gameState !== 'IDLE' && state.gameState !== 'HOME' && state.gameState !== 'INTRO' && state.gameState !== 'PULLING') {
         for(let iter = 0; iter < 25; iter++) { 
-            for(let i = 0; i < 59; i++) {
+            for(let i = 0; i < numRopeSegments; i++) {
                 let p1 = state.ropePoints[i]; let p2 = state.ropePoints[i+1];
                 let dx = p2.x - p1.x; let dy = p2.y - p1.y;
                 let dist = Math.sqrt(dx*dx + dy*dy) || 0.001;
                 let diff = (dist - targetLength) / dist;
                 let offsetX = dx * diff * 0.5; let offsetY = dy * diff * 0.5;
                 
-                if (i !== 0) { p1.x += offsetX; p1.y += offsetY; if (p1.y > 5600) p1.y = 5600; }
-                if (i + 1 !== 59) { p2.x -= offsetX; p2.y -= offsetY; if (p2.y > 5600) p2.y = 5600; }
+                let maxD = state.isTutorialMode ? 900 : 5600;
+                if (i !== 0) { p1.x += offsetX; p1.y += offsetY; if (p1.y > maxD) p1.y = maxD; }
+                if (i + 1 !== numRopeSegments) { p2.x -= offsetX; p2.y -= offsetY; if (p2.y > maxD) p2.y = maxD; }
             }
         }
     }
@@ -735,8 +826,9 @@ function updatePhysics() {
         bh.y += bh.vy;
         bh.decayLife -= 0.005; 
 
-        if (bh.y >= 5600) { // maxDepth = 5600
-            bh.y = 5600;
+        let maxD = state.isTutorialMode ? 900 : 5600;
+        if (bh.y >= maxD) { // maxDepth = 5600
+            bh.y = maxD;
             bh.vx *= 0.8;
             bh.vy = 0;
         }
@@ -766,7 +858,7 @@ function gameLoop(timestamp) {
 
     let now = Date.now();
 
-    if (state.gameState === 'HOME' || state.gameState === 'INTRO') {
+    if (state.gameState === 'HOME' || state.gameState === 'INTRO' || state.isTutorialMode) {
         state.cycleTime = 0.5; 
         state.isRaining = false;
         state.currentRainIntensity = 0;
@@ -902,6 +994,9 @@ function gameLoop(timestamp) {
     }
 
     updatePhysics();
+    if (state.isTutorialMode) {
+        updateTutorial();
+    }
 
     let mouseOffsetX = (state.mouseX - state.logicalWidth / 2) * 0.15;
     let mouseOffsetY = (state.mouseY - state.logicalHeight / 2) * 0.15;
@@ -980,6 +1075,7 @@ function gameLoop(timestamp) {
 }
 
 function drawEngine() {
+    let maxD = state.isTutorialMode ? 900 : 5600;
     let nowDraw = Date.now();
     const dpr = window.devicePixelRatio || 1;
 
@@ -1004,7 +1100,8 @@ function drawEngine() {
     let drawWidth = maxX - minX;
 
     function getDepthColor(y) {
-        let ratio = Math.max(0, Math.min(1, (y - 400) / (5600 - 400)));
+        let maxD = state.isTutorialMode ? 900 : 5600;
+        let ratio = Math.max(0, Math.min(1, (y - 400) / (maxD - 400)));
         let lightInfluence = dayAmount * Math.max(0, 1 - ratio * 5); 
         let r = Math.floor(2 + lightInfluence * 20);
         let g = Math.floor(8 + lightInfluence * 80);
@@ -1102,20 +1199,25 @@ function drawEngine() {
         let islandX = state.logicalWidth / 2 - 1000 - state.cameraX;
         let islandY = 400 - state.cameraY; 
         
-        // Render tree first (behind island)
+        // Render tree first (behind island) with a subtle swaying animation
         let treeX = islandX - 25;
-        let treeY = islandY - 70; 
+        let treeBaseY = islandY + 25;
+        
+        ctx.save();
+        ctx.translate(treeX, treeBaseY);
+        let sway = Math.sin(nowDraw * 0.0015) * 0.035; // subtle sway
+        ctx.rotate(sway);
         
         ctx.strokeStyle = '#4e3e35'; 
         ctx.lineWidth = 6;
         ctx.lineCap = 'round';
         ctx.beginPath();
-        ctx.moveTo(treeX, islandY + 25); 
-        ctx.quadraticCurveTo(treeX - 18, treeY - 25, treeX - 5, treeY - 55);
+        ctx.moveTo(0, 0); 
+        ctx.quadraticCurveTo(-18, -120, -5, -150);
         ctx.stroke();
 
-        let leafX = treeX - 5;
-        let leafY = treeY - 55;
+        let leafX = -5;
+        let leafY = -150;
         ctx.fillStyle = '#48bb78'; 
         
         ctx.beginPath();
@@ -1135,6 +1237,8 @@ function drawEngine() {
         ctx.arc(leafX - 4, leafY, 4.5, 0, Math.PI*2);
         ctx.arc(leafX + 4, leafY + 2, 4, 0, Math.PI*2);
         ctx.fill();
+        
+        ctx.restore();
 
         // Render island second (in front of tree base) with clean sand color
         ctx.fillStyle = '#eed19c';
@@ -1154,32 +1258,42 @@ function drawEngine() {
         ctx.save();
         ctx.globalAlpha = introFade;
 
+        // Title - clean white, no text shadow
         ctx.font = "900 52px 'Inter', sans-serif";
         ctx.fillStyle = '#ffffff';
         ctx.textBaseline = 'middle';
         ctx.textAlign = 'center';
         ctx.fillText("THE FISHERMAN", uiX, uiY);
 
-        ctx.font = "500 11px 'Inter', sans-serif";
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
-        ctx.fillText("SET SAIL TO DISCOVER THE DEEP", uiX, uiY + 45);
+        let cx = state.logicalWidth / 2;
+        let cy = state.logicalHeight / 2;
+        let Z = state.cameraZoom;
 
         let screenBtnX = (state.logicalWidth / 2 + START_UI_X_OFFSET - state.cameraX);
-        let screenBtnY = (400 - 140 - state.cameraY);
+        let startBtnX = screenBtnX - 100;
+        let tutorialBtnX = screenBtnX + 100;
+        let startBtnY = (400 - 150 - state.cameraY);
+        let tutorialBtnY = (400 - 150 - state.cameraY);
         
-        let btnProjX = (screenBtnX - cx) * Z + cx;
-        let btnProjY = (screenBtnY - cy) * Z + cy;
+        let startProjX = (startBtnX - cx) * Z + cx;
+        let startProjY = (startBtnY - cy) * Z + cy;
+        let tutorialProjX = (tutorialBtnX - cx) * Z + cx;
+        let tutorialProjY = (tutorialBtnY - cy) * Z + cy;
 
-        let dx = state.mouseX - btnProjX;
-        let dy = state.mouseY - btnProjY;
-        
-        let btnW = 120 * Z;
-        let btnH = 35 * Z;
-        let isHovered = (Math.abs(dx) < btnW / 2 && Math.abs(dy) < btnH / 2 && state.gameState === 'HOME');
+        let btnW = 160 * Z;
+        let btnH = 40 * Z;
 
+        let dxStart = state.mouseX - startProjX;
+        let dyStart = state.mouseY - startProjY;
+        let dxTutorial = state.mouseX - tutorialProjX;
+        let dyTutorial = state.mouseY - tutorialProjY;
+
+        let isStartHovered = (Math.abs(dxStart) < btnW / 2 && Math.abs(dyStart) < btnH / 2 && state.gameState === 'HOME');
+        let isTutorialHovered = (Math.abs(dxTutorial) < btnW / 2 && Math.abs(dyTutorial) < btnH / 2 && state.gameState === 'HOME');
+ 
         const cursorDot = document.getElementById('cursor-dot');
         if (cursorDot) {
-            if (isHovered) {
+            if (isStartHovered || isTutorialHovered) {
                 cursorDot.style.width = '14px';
                 cursorDot.style.height = '14px';
             } else {
@@ -1188,25 +1302,36 @@ function drawEngine() {
             }
         }
 
-        state.playArrowWidth += ((isHovered ? 72 : 44) - state.playArrowWidth) * 0.15;
-
         ctx.save();
-        ctx.strokeStyle = isHovered ? '#ffffff' : 'rgba(255, 255, 255, 0.7)';
-        ctx.lineWidth = 3;
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
-
-        let arrowHalf = state.playArrowWidth / 2;
-        ctx.beginPath();
-        ctx.moveTo(screenBtnX - arrowHalf, screenBtnY);
-        ctx.lineTo(screenBtnX + arrowHalf, screenBtnY);
+        ctx.textBaseline = 'middle';
+        ctx.textAlign = 'center';
+        ctx.font = "900 24px monospace";
         
-        let headSize = 8;
-        ctx.lineTo(screenBtnX + arrowHalf - headSize, screenBtnY - headSize);
-        ctx.moveTo(screenBtnX + arrowHalf, screenBtnY);
-        ctx.lineTo(screenBtnX + arrowHalf - headSize, screenBtnY + headSize);
-        ctx.stroke();
+        // Start Button ("GAME")
+        ctx.fillStyle = isStartHovered ? '#ffffff' : 'rgba(255, 255, 255, 0.7)';
+        ctx.fillText("GAME", startBtnX, startBtnY);
+        if (isStartHovered) {
+            let textW = ctx.measureText("GAME").width;
+            ctx.beginPath();
+            ctx.moveTo(startBtnX - textW/2, startBtnY + 12);
+            ctx.lineTo(startBtnX + textW/2, startBtnY + 12);
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 1.0; // 1px clean line
+            ctx.stroke();
+        }
 
+        // Tutorial Button ("TUTORIAL")
+        ctx.fillStyle = isTutorialHovered ? '#ffffff' : 'rgba(255, 255, 255, 0.7)';
+        ctx.fillText("TUTORIAL", tutorialBtnX, tutorialBtnY);
+        if (isTutorialHovered) {
+            let textW = ctx.measureText("TUTORIAL").width;
+            ctx.beginPath();
+            ctx.moveTo(tutorialBtnX - textW/2, tutorialBtnY + 12);
+            ctx.lineTo(tutorialBtnX + textW/2, tutorialBtnY + 12);
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 1.0; // 1px clean line
+            ctx.stroke();
+        }
         ctx.restore();
         ctx.restore();
     }
@@ -1662,7 +1787,7 @@ function drawEngine() {
         ctx.restore();
     }
 
-    let floorY = 5600 - state.cameraY; // maxDepth = 5600
+    let floorY = maxD - state.cameraY; // maxDepth = 5600
     if (floorY < maxY && floorY > minY) {
         let floorGlow = ctx.createLinearGradient(0, floorY - 150, 0, floorY);
         floorGlow.addColorStop(0, 'rgba(10, 16, 24, 0)');
@@ -1714,16 +1839,19 @@ function drawEngine() {
         let isClosestCandidate = closestFish.includes(f);
         f.update(isClosestCandidate);
 
-        if (f.isDead && (f.decayLife <= 0 || f.y >= 5600)) { // maxDepth = 5600
+        let maxD = state.isTutorialMode ? 900 : 5600;
+        if (f.isDead && (f.decayLife <= 0 || f.y >= maxD)) { // maxDepth = 5600
             let isBird = f.isBird;
             if (f.laneIndex !== undefined) {
                 freeLaneIndex(f.isBird, f.laneIndex);
             }
             state.fishList.splice(i, 1);
             
-            let replacement = new Fish(isBird);
-            replacement.reset(true); 
-            state.fishList.push(replacement); 
+            if (!state.isTutorialMode) {
+                let replacement = new Fish(isBird);
+                replacement.reset(true); 
+                state.fishList.push(replacement); 
+            }
         }
     }
 
@@ -1731,7 +1859,7 @@ function drawEngine() {
         if (!f.isBird || (f.isBird && f.y >= 400)) f.draw(ctx); // waterSurfaceY = 400
     });
 
-    let hookDepthRatio = Math.max(0, Math.min(1, (state.hook.y - 400) / (5600 - 400)));
+    let hookDepthRatio = Math.max(0, Math.min(1, (state.hook.y - 400) / (maxD - 400)));
     let glowIntensity = Math.min(1, hookDepthRatio * 2.5); 
     
     if (glowIntensity > 0.05) {
@@ -1778,17 +1906,20 @@ function drawEngine() {
         ctx.lineWidth = 1.5;
         ctx.beginPath();
         if (state.ropePoints[0]) {
+            let numPoints = state.ropePoints.length;
             ctx.moveTo(state.ropePoints[0].x - state.cameraX, state.ropePoints[0].y - state.cameraY);
             
-            for (let i = 1; i < 58; i++) { // numRopeSegments - 2 = 58
+            for (let i = 1; i < numPoints - 2; i++) {
                 let xc = (state.ropePoints[i].x + state.ropePoints[i + 1].x) / 2;
                 let yc = (state.ropePoints[i].y + state.ropePoints[i + 1].y) / 2;
                 ctx.quadraticCurveTo(state.ropePoints[i].x - state.cameraX, state.ropePoints[i].y - state.cameraY, xc - state.cameraX, yc - state.cameraY);
             }
-            if (state.ropePoints[58] && state.ropePoints[59]) {
+            if (numPoints >= 2) {
+                let pPenultimate = state.ropePoints[numPoints - 2];
+                let pLast = state.ropePoints[numPoints - 1];
                 ctx.quadraticCurveTo(
-                    state.ropePoints[58].x - state.cameraX, state.ropePoints[58].y - state.cameraY,
-                    state.ropePoints[59].x - state.cameraX, state.ropePoints[59].y - state.cameraY
+                    pPenultimate.x - state.cameraX, pPenultimate.y - state.cameraY,
+                    pLast.x - state.cameraX, pLast.y - state.cameraY
                 );
             }
             ctx.stroke();
@@ -1934,8 +2065,167 @@ function drawEngine() {
         ctx.restore();
     }
 
+    // Tutorial overlay call removed to put instructions inside standard notifications as requested
+
     ctx.restore(); 
     ctx.restore(); 
+}
+
+function showTutorialMessage(title, desc) {
+    const msgText = document.getElementById('msg-text');
+    const msgMeta = document.getElementById('msg-meta');
+    const messageBox = document.getElementById('message-box');
+    if (!msgText || !msgMeta || !messageBox) return;
+
+    msgMeta.textContent = "TUTORIAL: " + title;
+    msgText.innerHTML = desc; 
+    messageBox.classList.remove('hidden');
+    state.msgTimer = 999999; // Don't auto-dismiss
+}
+
+function updateTutorial() {
+    if (!state.isTutorialMode) return;
+
+    const colModal = document.getElementById('collection-modal');
+    const storeModal = document.getElementById('store-modal');
+
+    // Manage step notifications and transitions
+    switch (state.tutorialStep) {
+        case 0: // Step 0: Winding instruction
+            state.tutorialPaused = (state.gameState === 'IDLE');
+            showTutorialMessage("WINDING", "Pull your rod back by dragging or holding press on the screen.");
+            if (state.gameState === 'PULLING') {
+                state.tutorialPaused = false;
+                state.tutorialStep = 1;
+                AudioManager.playSuccess();
+            }
+            break;
+
+        case 1: // Step 1: Casting instruction (while pulling)
+            showTutorialMessage("CASTING", "Release your click/touch to cast the hook out into the sea!");
+            if (state.gameState === 'CASTING' || state.gameState === 'SINKING') {
+                state.tutorialStep = 2;
+                AudioManager.playSuccess();
+            }
+            break;
+
+        case 2: // Step 2: Sinking / Hooking instruction
+            state.tutorialPaused = false;
+            showTutorialMessage("HOOKING", "Let the hook sink. Wait for the fish to touch the hook to bite!");
+            if (state.gameState === 'REELING' && state.hookedFish) {
+                state.tutorialStep = 3;
+                AudioManager.playSuccess();
+            }
+            break;
+
+        case 3: // Step 3: Reeling / Catching instruction
+            state.tutorialPaused = false;
+            showTutorialMessage("REELING & CATCHING", "Rhythmic alternate presses! Press <span style='border:1px solid #fff; padding:1px 4px; border-radius:4px; background:rgba(255,255,255,0.1); font-weight:bold;'>L</span> and <span style='border:1px solid #fff; padding:1px 4px; border-radius:4px; background:rgba(255,255,255,0.1); font-weight:bold;'>R</span> keys alternately (or click the buttons) to reel the fish in! Keep tension out of the RED!");
+            if (state.caughtFishStack.length > 0) {
+                state.tutorialStep = 4;
+                AudioManager.playSuccess();
+            }
+            break;
+
+        case 4: // Step 4: First fish caught. Teach exhaustion intro (winding/casting second fish)
+            state.tutorialPaused = (state.gameState === 'IDLE');
+            if (!state.spawnedExhaustionFish) {
+                state.spawnedExhaustionFish = true;
+                state.fishList = []; // Clear other fish
+                let fish = new Fish(false);
+                fish.x = state.logicalWidth / 2;
+                fish.y = 400 + 150;
+                fish.size = 35;
+                fish.maxHealth = 150;
+                fish.health = 150;
+                fish.vx = fish.speed;
+                state.fishList.push(fish);
+            }
+            showTutorialMessage("EXHAUSTION INTRO", "Great catch! Let's learn how to exhaust a strong fish. Hold & drag to cast again.");
+            if (state.gameState === 'PULLING') {
+                state.tutorialPaused = false;
+                state.tutorialStep = 5;
+                AudioManager.playSuccess();
+            }
+            break;
+
+        case 5: // Step 5: Casting second fish
+            showTutorialMessage("EXHAUSTION CAST", "Release your click/touch to cast and hook the newly spawned fish.");
+            if (state.gameState === 'CASTING' || state.gameState === 'SINKING') {
+                state.tutorialStep = 6;
+                AudioManager.playSuccess();
+            }
+            break;
+
+        case 6: // Step 6: Hooking second fish
+            state.tutorialPaused = false;
+            showTutorialMessage("EXHAUSTION HOOKING", "Wait for the fish to touch the hook to bite.");
+            if (state.gameState === 'REELING' && state.hookedFish) {
+                state.tutorialStep = 7;
+                AudioManager.playSuccess();
+            }
+            break;
+
+        case 7: // Step 7: Exhaustion attacking instructions
+            state.tutorialPaused = false;
+            showTutorialMessage("EXHAUST THE FISH", "This fish is too strong! <span style='color: #22c55e; font-weight:bold;'>RAPIDLY CLICK/TAP DIRECTLY ON THE STRUGGLING FISH</span> to attack and exhaust it. Drain its green health bar to 0!");
+            if (state.exhaustionSucceeded) {
+                state.tutorialStep = 8;
+                AudioManager.playSuccess();
+            }
+            break;
+
+        case 8: // Step 8: Sell catching / Open Bucket instructions
+            state.tutorialPaused = (state.gameState === 'IDLE');
+            showTutorialMessage("MY BUCKET", "Excellent work! You have caught a fish. Click <span style='color:#ca8a04; font-weight:bold;'>'MY BUCKET'</span> at the top right to view your catch.");
+            if (colModal && !colModal.classList.contains('hidden') && colModal.classList.contains('opacity-100')) {
+                state.tutorialStep = 9;
+                AudioManager.playSuccess();
+            }
+            break;
+
+        case 9: // Step 9: Selling fish inside bucket
+            state.tutorialPaused = false;
+            showTutorialMessage("SELLING CATCH", "Click the <span style='background:#18181b; color:#fff; padding:1px 6px; border-radius:4px; font-weight:bold;'>SELL</span> button next to your fish to earn cash!");
+            if (state.caughtFishStack.length === 0 && state.playerMoney > 0) {
+                state.tutorialStep = 10;
+                AudioManager.playSuccess();
+            }
+            break;
+
+        case 10: // Step 10: Open Marketplace
+            state.tutorialPaused = (state.gameState === 'IDLE');
+            if (colModal && colModal.classList.contains('hidden')) {
+                showTutorialMessage("MARKETPLACE", "Now let's visit the shop. Click <span style='color:#ca8a04; font-weight:bold;'>'MARKETPLACE'</span> at the top right.");
+                if (storeModal && !storeModal.classList.contains('hidden') && storeModal.classList.contains('opacity-100')) {
+                    state.tutorialStep = 11;
+                    AudioManager.playSuccess();
+                }
+            } else {
+                showTutorialMessage("SELL CATCH", "Awesome! Close the bucket modal by clicking outside of it.");
+            }
+            break;
+
+        case 11: // Step 11: Buy hook resupply
+            state.tutorialPaused = false;
+            showTutorialMessage("HOOK SUPPLIES", "Purchase a <span style='font-weight:bold; color:#18181b;'>HOOK RESUPPLY</span> using your cash. In the real game, you need hooks in stock to go on voyages!");
+            if (state.playerHooks > 10) {
+                state.tutorialStep = 12;
+                AudioManager.playSuccess();
+                if (typeof window.closeModal === 'function') {
+                    window.closeModal('store-modal', 'store-modal-content');
+                } else {
+                    const storeModalEl = document.getElementById('store-modal');
+                    if (storeModalEl) storeModalEl.classList.add('hidden');
+                }
+            }
+            break;
+
+        case 12: // Step 12: Ending mechanics explanation & click to complete
+            state.tutorialPaused = true;
+            showTutorialMessage("ENDINGS & GOALS", "EXPEDITION ENDINGS:<br>• <b>Hookless:</b> Run out of hooks & cash.<br>• <b>Boatless:</b> Overload boat capacity, cracking the vessel.<br><br><span style='color:#fbbf24; animation: pulseAnim 2s infinite ease-in-out;'>CLICK ANYWHERE ON THE SCREEN TO FINISH.</span>");
+            break;
+    }
 }
 
 // Bind engine functions globally

@@ -64,14 +64,41 @@ window.onload = () => {
             state.hook.vx = rawSpeedX * cosA - rawSpeedY * sinA;
             state.hook.vy = (rawSpeedX * sinA + rawSpeedY * cosA) - 1.2; 
             
-            for(let i=0; i<60; i++) { // numRopeSegments = 60
-                let t = i / 60;
+            let ropeCount = state.ropePoints.length || 60;
+            for(let i=0; i<ropeCount; i++) { 
+                let t = i / (ropeCount - 1 || 1);
                 state.ropePoints[i].x = state.rodTip.x + (state.hook.vx * 3.5 * t);
                 state.ropePoints[i].y = state.rodTip.y + (state.hook.vy * 3.5 * t);
                 state.ropePoints[i].old_x = state.ropePoints[i].x;
                 state.ropePoints[i].old_y = state.ropePoints[i].y;
             }
         }
+    }
+
+    function triggerFadeToBlack(onComplete) {
+        let overlay = document.createElement('div');
+        overlay.style.position = 'fixed';
+        overlay.style.top = '0';
+        overlay.style.left = '0';
+        overlay.style.width = '100vw';
+        overlay.style.height = '100vh';
+        overlay.style.backgroundColor = '#000000';
+        overlay.style.opacity = '0';
+        overlay.style.transition = 'opacity 1s ease-in-out';
+        overlay.style.zIndex = '99999';
+        document.body.appendChild(overlay);
+
+        setTimeout(() => {
+            overlay.style.opacity = '1';
+        }, 50);
+
+        setTimeout(() => {
+            if (onComplete) onComplete();
+            overlay.style.opacity = '0';
+            setTimeout(() => {
+                overlay.remove();
+            }, 1000);
+        }, 1100);
     }
 
     function handleCanvasDown(e) {
@@ -85,6 +112,25 @@ window.onload = () => {
             clientY = e.clientY;
         }
 
+        if (state.isTutorialMode && state.tutorialStep === 12) {
+            triggerFadeToBlack(() => {
+                state.isTutorialMode = false;
+                state.tutorialStep = 0;
+                state.tutorialPaused = false;
+                state.spawnedExhaustionFish = false;
+
+                const messageBoxEl = document.getElementById('message-box');
+                if (messageBoxEl) messageBoxEl.classList.add('hidden');
+
+                if (typeof window.resetToDefaultState === 'function') {
+                    window.resetToDefaultState();
+                } else {
+                    state.gameState = 'HOME';
+                }
+            });
+            return;
+        }
+
         if (state.gameState === 'HOME') {
             let cx = state.logicalWidth / 2;
             let cy = state.logicalHeight / 2;
@@ -92,17 +138,25 @@ window.onload = () => {
 
             let START_UI_X_OFFSET = -850; 
             let screenBtnX_world = (cx + START_UI_X_OFFSET - state.cameraX);
-            let screenBtnY_world = (400 - 140 - state.cameraY); // waterSurfaceY = 400
             
-            let buttonProjX = (screenBtnX_world - cx) * Z + cx;
-            let buttonProjY = (screenBtnY_world - cy) * Z + cy;
+            let startBtnX_world = screenBtnX_world - 100;
+            let tutorialBtnX_world = screenBtnX_world + 100;
+            let startBtnY_world = (400 - 150 - state.cameraY);
+            let tutorialBtnY_world = (400 - 150 - state.cameraY);
+            
+            let startProjX = (startBtnX_world - cx) * Z + cx;
+            let startProjY = (startBtnY_world - cy) * Z + cy;
+            
+            let tutorialProjX = (tutorialBtnX_world - cx) * Z + cx;
+            let tutorialProjY = (tutorialBtnY_world - cy) * Z + cy;
 
-            let hitboxW = (window.isTouchDevice ? 180 : 120) * Z;
-            let hitboxH = (window.isTouchDevice ? 80 : 45) * Z;
+            let hitboxW = (window.isTouchDevice ? 180 : 140) * Z;
+            let hitboxH = (window.isTouchDevice ? 60 : 40) * Z;
 
-            let dx = clientX - buttonProjX;
-            let dy = clientY - buttonProjY;
-            if (Math.abs(dx) < hitboxW / 2 && Math.abs(dy) < hitboxH / 2) {
+            let dxStart = clientX - startProjX;
+            let dyStart = clientY - startProjY;
+            if (Math.abs(dxStart) < hitboxW / 2 && Math.abs(dyStart) < hitboxH / 2) {
+                state.isTutorialMode = false;
                 state.gameState = 'INTRO';
                 AudioManager.playCast();
                 for (let i = 0; i < 15; i++) {
@@ -113,6 +167,27 @@ window.onload = () => {
                         15
                     ));
                 }
+                return;
+            }
+
+            let dxTut = clientX - tutorialProjX;
+            let dyTut = clientY - tutorialProjY;
+            if (Math.abs(dxTut) < hitboxW / 2 && Math.abs(dyTut) < hitboxH / 2) {
+                state.isTutorialMode = true;
+                state.tutorialStep = 0;
+                state.tutorialPaused = false;
+                state.spawnedExhaustionFish = false;
+                state.gameState = 'INTRO';
+                AudioManager.playCast();
+                for (let i = 0; i < 15; i++) {
+                    state.wakeParticles.push(new WakeParticle(
+                        state.boatWorldX - 30,
+                        400, // waterSurfaceY = 400
+                        -2 - Math.random() * 2,
+                        15
+                    ));
+                }
+                return;
             }
             return;
         }
@@ -120,6 +195,9 @@ window.onload = () => {
         if (state.gameState === 'INTRO' || state.gameState === 'GAMEOVER') return; 
 
         if (state.gameState === 'IDLE') {
+            if (state.isTutorialMode && state.tutorialStep >= 8) {
+                return; // Guard post-catch tutorial tasks
+            }
             const currentBoat = storeInventory.boatTypes.find(b => b.id === state.playerEquipment.boatType);
             const maxCap = currentBoat ? currentBoat.capacity : 5;
             
@@ -168,9 +246,13 @@ window.onload = () => {
                 AudioManager.playReelTick();
                 
                 if (state.hookedFish.health <= 0) {
+                    if (state.isTutorialMode && state.tutorialStep === 7) {
+                        state.exhaustionSucceeded = true;
+                    }
                     state.hookedFish.isDead = true;
                     createBloodParticles(state.hookedFish.x, state.hookedFish.y, 35);
                     AudioManager.playDeath();
+                    state.playerStats.exhaustedCount = (state.playerStats.exhaustedCount || 0) + 1;
                     showMessage(`${state.hookedFish.name} died from exhaustion! Released.`, "danger");
                     
                     if (state.hookedFish.isBird) {
@@ -276,6 +358,9 @@ window.onload = () => {
 
     function updateMoney(amount) {
         state.playerMoney = Math.min(1000000000, Math.max(0, state.playerMoney + amount));
+        if (amount > 0) {
+            state.playerStats.totalMoneyEarned = (state.playerStats.totalMoneyEarned || 0) + amount;
+        }
         const playerMoneyDisplay = document.getElementById('player-money-display');
         const storeMoneyDisplay = document.getElementById('store-money-display');
         if (playerMoneyDisplay) playerMoneyDisplay.textContent = state.playerMoney.toLocaleString();
@@ -285,9 +370,17 @@ window.onload = () => {
 
     function checkAndRenderBadges() {
         if (state.playerStats.catchesCount >= 1) BADGES.first_catch.earned = true;
+        if (state.playerStats.catchesCount >= 10) BADGES.catches_10.earned = true;
+        if (state.playerStats.catchesCount >= 25) BADGES.catches_25.earned = true;
         if (state.playerStats.maxDepthReached >= 300) BADGES.deep_diver.earned = true;
         if (state.playerStats.rareCaught) BADGES.rare_hunter.earned = true;
         if (state.playerStats.escapesCount >= 5) BADGES.escape_survivor.earned = true;
+        if (state.playerStats.escapesCount >= 15) BADGES.escapes_15.earned = true;
+        if (state.playerStats.exhaustedCount >= 3) BADGES.exhausted_3.earned = true;
+        if (state.playerStats.exhaustedCount >= 8) BADGES.exhausted_8.earned = true;
+        if (state.playerStats.photosTakenCount >= 5) BADGES.photos_5.earned = true;
+        if (state.playerStats.totalMoneyEarned >= 1000) BADGES.money_1000.earned = true;
+        if (state.playerStats.totalMoneyEarned >= 5000) BADGES.money_5000.earned = true;
         if (state.playerStats.goldAlbatross) BADGES.gold_albatross.earned = true;
         if (state.playerStats.goldLeviathan) BADGES.gold_leviathan.earned = true;
         if (state.playerStats.goldTerror) BADGES.gold_terror.earned = true;
@@ -330,6 +423,15 @@ window.onload = () => {
         collectionList.innerHTML = '';
         updateBucketHUD();
         
+        const sellAllBtn = document.getElementById('sell-all-btn');
+        if (sellAllBtn) {
+            if (state.caughtFishStack.length === 0) {
+                sellAllBtn.classList.add('no-catch');
+            } else {
+                sellAllBtn.classList.remove('no-catch');
+            }
+        }
+        
         const currentBoat = storeInventory.boatTypes.find(b => b.id === state.playerEquipment.boatType);
         const maxCap = currentBoat ? currentBoat.capacity : 5;
 
@@ -338,7 +440,7 @@ window.onload = () => {
         } else {
             state.caughtFishStack.forEach((fish, index) => {
                 const card = document.createElement('div');
-                let rarityClass = `rarity-${fish.rarity.toLowerCase()}`;
+                let rarityClass = `rarity-${fish.rarity.toLowerCase().replace(/\s+/g, '-')}`;
                 let correctSVG = CREATURE_SVGS[fish.creatureType] || CREATURE_SVGS['fish'];
                 card.className = `catch-card ${rarityClass}`;
                 card.innerHTML = `
@@ -411,7 +513,11 @@ window.onload = () => {
             { key: 'boatTypes', title: 'Vessel Types & Capacity', type: 'boatType' }
         ];
 
-        categories.forEach(cat => {
+        const activeCategories = state.isTutorialMode 
+            ? categories.filter(c => c.key === 'supplies') 
+            : categories;
+
+        activeCategories.forEach(cat => {
             const section = document.createElement('div');
             section.innerHTML = `<h3 class="modal-section-title">${cat.title}</h3>`;
             
@@ -645,6 +751,20 @@ window.onload = () => {
     if (btnRotate) btnRotate.onclick = () => selectPhotoControlMode('rotate');
     if (btnScale) btnScale.onclick = () => selectPhotoControlMode('scale');
 
+    const btnRecenter = document.getElementById('photo-control-recenter');
+    if (btnRecenter) {
+        btnRecenter.onclick = () => {
+            const photoCanvas = document.getElementById('photo-canvas');
+            const targetWidth = photoCanvas ? photoCanvas.width : 640;
+            const targetHeight = photoCanvas ? photoCanvas.height : 480;
+            state.photoFishX = targetWidth / 2;
+            state.photoFishY = targetHeight / 2;
+            state.photoFishRotation = 0;
+            state.photoFishScale = 1.0;
+            AudioManager.playClick();
+        };
+    }
+
     function initiatePhotoSession(fishSpec) {
         closeModal('collection-modal', 'collection-modal-content');
         openModal('photo-modal', 'photo-modal-content');
@@ -851,6 +971,7 @@ window.onload = () => {
         btnSnap.onclick = () => {
             const photoCanvas = document.getElementById('photo-canvas');
             if (!photoCanvas || !state.photoFishInstance) return;
+            state.playerStats.photosTakenCount = (state.playerStats.photosTakenCount || 0) + 1;
             const dataURL = photoCanvas.toDataURL("image/png");
             const link = document.createElement('a');
             link.href = dataURL;
@@ -887,140 +1008,152 @@ window.onload = () => {
         };
     }
 
+    function resetToDefaultState() {
+        state.cameraX = 0;
+        state.cameraY = 0;
+        state.mouseX = 0;
+        state.mouseY = 0;
+        state.boatBob = 0;
+        state.boatVy = 0;
+        state.boatTilt = 0;
+        state.boatVTilt = 0;
+        state.rodRotation = 0;
+        state.rodWhipVelocity = 0;
+        state.manFacingRight = true;
+        state.rodTip = { x: 0, y: 0 };
+        state.msgTimer = 0;
+        state.cycleTime = 0.5;
+        state.pullStartX = 0;
+        state.pullStartY = 0;
+        state.pullCurrentX = 0;
+        state.pullCurrentY = 0;
+        state.hook = { x: 0, y: 0, vx: 0, vy: 0 };
+        state.hookedFish = null;
+        state.lineTension = 0;
+        state.slackTimer = 0;
+        state.cameraZoom = 1.0;
+        state.brokenHooks = [];
+        state.isRaining = false;
+        state.currentRainIntensity = 0;
+        state.playerMoney = 0;
+        state.playerHooks = 10;
+        state.hookBuyQty = 1;
+        state.overCapacityCount = 0;
+        state.boatBroken = false;
+        state.boatBrokenTimer = 0;
+        state.fishermanSpeech = "";
+        state.fishermanSpeechTimer = 0;
+        state.caughtFishStack = [];
+        state.fishList = [];
+        state.sessionCaughtLog = [];
+        state.currentSortOption = 'newest';
+        state.photoModalOpen = false;
+        state.photoFishInstance = null;
+        state.isDraggingPhotoFish = false;
+        state.computedDistanceScale = 1.0;
+        state.assignedFishLanes = [];
+        state.assignedBirdLanes = [];
+        state.lastPressedKey = null;
+        state.lastReelTime = 0;
+        state.reelEnergy = 0;
+        state.baseReelStrength = 2.0;
+        state.gameState = 'HOME';
+        state.playerStats = {
+            catchesCount: 0,
+            escapesCount: 0,
+            maxDepthReached: 0,
+            rareCaught: false,
+            goldAlbatross: false,
+            goldLeviathan: false,
+            goldTerror: false,
+            goldSunray: false,
+            goldTurtle: false,
+            forbiddenMammalEarned: false,
+            exhaustedCount: 0,
+            photosTakenCount: 0,
+            totalMoneyEarned: 0
+        };
+        state.playerEquipment = {
+            rod: 'wood_rod',
+            hat: 'none',
+            shirt: 'blue',
+            boatColor: 'brown',
+            boatType: 'wood'
+        };
+        state.ownedItems = {
+            rods: ['wood_rod'],
+            hats: ['none'],
+            shirts: ['blue'],
+            boatColors: ['brown'],
+            boatTypes: ['wood'],
+            supplies: []
+        };
+
+        // Reset badges
+        Object.keys(BADGES).forEach(key => {
+            BADGES[key].earned = false;
+        });
+
+        // Hide endgame/gameover containers & modals
+        const endgameContainer = document.getElementById('endgame-container');
+        if (endgameContainer) {
+            endgameContainer.classList.add('hidden', 'opacity-0');
+            endgameContainer.classList.remove('fade-in-active');
+            endgameContainer.style.opacity = '0';
+        }
+
+        const summaryPhase = document.getElementById('summary-phase');
+        if (summaryPhase) summaryPhase.classList.add('hidden', 'opacity-0');
+
+        const hooklessPhase = document.getElementById('hookless-phase');
+        if (hooklessPhase) hooklessPhase.classList.add('hidden');
+
+        const boatlessPhase = document.getElementById('boatless-phase');
+        if (boatlessPhase) boatlessPhase.classList.add('hidden');
+
+        // Remove fade-out-active and hide all HUD elements
+        const elementsToReset = [
+            document.getElementById('depth-hud'),
+            document.getElementById('nav-hud'),
+            document.getElementById('drum-controller'),
+            document.getElementById('message-box')
+        ];
+        elementsToReset.forEach(el => {
+            if (el) {
+                el.classList.remove('fade-out-active');
+                el.classList.add('hidden');
+            }
+        });
+
+        // Reset modals
+        closeModal('collection-modal', 'collection-modal-content');
+        closeModal('store-modal', 'store-modal-content');
+        closeModal('guide-modal', 'guide-modal-content');
+
+        // Restore pointer-events for ui-layer so canvas can be clicked
+        const uiLayer = document.getElementById('ui-layer');
+        if (uiLayer) {
+            uiLayer.style.pointerEvents = '';
+        }
+
+        // Update displays
+        updateBucketHUD();
+        updateMoney(0);
+        checkAndRenderBadges();
+
+        // Re-initialize game engine
+        const canvas = document.getElementById('gameCanvas');
+        initializeEngine(canvas);
+    }
+    window.resetToDefaultState = resetToDefaultState;
+
     const restartConfirmOkBtn = document.getElementById('restart-confirm-ok-btn');
     if (restartConfirmOkBtn) {
         restartConfirmOkBtn.onclick = () => {
             AudioManager.playSuccess();
             if (restartSplitContainer) restartSplitContainer.classList.add('hidden');
             if (summaryRestartBtn) summaryRestartBtn.classList.remove('hidden');
-            
-            // 1. Reset all state properties back to default values
-            state.cameraX = 0;
-            state.cameraY = 0;
-            state.mouseX = 0;
-            state.mouseY = 0;
-            state.boatBob = 0;
-            state.boatVy = 0;
-            state.boatTilt = 0;
-            state.boatVTilt = 0;
-            state.rodRotation = 0;
-            state.rodWhipVelocity = 0;
-            state.manFacingRight = true;
-            state.rodTip = { x: 0, y: 0 };
-            state.msgTimer = 0;
-            state.cycleTime = 0.5;
-            state.pullStartX = 0;
-            state.pullStartY = 0;
-            state.pullCurrentX = 0;
-            state.pullCurrentY = 0;
-            state.hook = { x: 0, y: 0, vx: 0, vy: 0 };
-            state.hookedFish = null;
-            state.lineTension = 0;
-            state.slackTimer = 0;
-            state.cameraZoom = 1.0;
-            state.brokenHooks = [];
-            state.isRaining = false;
-            state.currentRainIntensity = 0;
-            state.playerMoney = 0;
-            state.playerHooks = 10;
-            state.hookBuyQty = 1;
-            state.overCapacityCount = 0;
-            state.boatBroken = false;
-            state.boatBrokenTimer = 0;
-            state.fishermanSpeech = "";
-            state.fishermanSpeechTimer = 0;
-            state.caughtFishStack = [];
-            state.fishList = []; // FIX: Clear fish/birds pool completely on reset!
-            state.sessionCaughtLog = [];
-            state.currentSortOption = 'newest';
-            state.photoModalOpen = false;
-            state.photoFishInstance = null;
-            state.isDraggingPhotoFish = false;
-            state.computedDistanceScale = 1.0;
-            state.assignedFishLanes = [];
-            state.assignedBirdLanes = [];
-            state.lastPressedKey = null;
-            state.lastReelTime = 0;
-            state.reelEnergy = 0;
-            state.baseReelStrength = 2.0;
-            state.gameState = 'HOME';
-            state.playerStats = {
-                catchesCount: 0,
-                escapesCount: 0,
-                maxDepthReached: 0,
-                rareCaught: false,
-                goldAlbatross: false,
-                goldLeviathan: false,
-                goldTerror: false,
-                goldSunray: false,
-                goldTurtle: false,
-                forbiddenMammalEarned: false
-            };
-            state.playerEquipment = {
-                rod: 'wood_rod',
-                hat: 'none',
-                shirt: 'blue',
-                boatColor: 'brown',
-                boatType: 'wood'
-            };
-            state.ownedItems = {
-                rods: ['wood_rod'],
-                hats: ['none'],
-                shirts: ['blue'],
-                boatColors: ['brown'],
-                boatTypes: ['wood'],
-                supplies: []
-            };
-
-            // Reset badges
-            Object.keys(BADGES).forEach(key => {
-                BADGES[key].earned = false;
-            });
-
-            // 2. Hide endgame/gameover containers & modals
-            const endgameContainer = document.getElementById('endgame-container');
-            if (endgameContainer) {
-                endgameContainer.classList.add('hidden');
-                endgameContainer.classList.remove('fade-in-active');
-                endgameContainer.style.opacity = '0';
-            }
-
-            const summaryPhase = document.getElementById('summary-phase');
-            if (summaryPhase) summaryPhase.classList.add('hidden');
-
-            const hooklessPhase = document.getElementById('hookless-phase');
-            if (hooklessPhase) hooklessPhase.classList.add('hidden');
-
-            const boatlessPhase = document.getElementById('boatless-phase');
-            if (boatlessPhase) boatlessPhase.classList.add('hidden');
-
-            // 3. Remove fade-out-active and hide all HUD elements
-            const elementsToReset = [
-                document.getElementById('depth-hud'),
-                document.getElementById('nav-hud'),
-                document.getElementById('drum-controller'),
-                document.getElementById('message-box')
-            ];
-            elementsToReset.forEach(el => {
-                if (el) {
-                    el.classList.remove('fade-out-active');
-                    el.classList.add('hidden');
-                }
-            });
-
-            // 4. Reset modals
-            closeModal('collection-modal', 'collection-modal-content');
-            closeModal('store-modal', 'store-modal-content');
-            closeModal('guide-modal', 'guide-modal-content');
-
-            // 5. Update React/DOM HUD displays
-            updateBucketHUD();
-            updateMoney(0);
-            checkAndRenderBadges();
-
-            // 6. Re-initialize the game engine canvas
-            const canvas = document.getElementById('gameCanvas');
-            initializeEngine(canvas);
+            resetToDefaultState();
         };
     }
 
@@ -1233,6 +1366,7 @@ window.onload = () => {
 
     function handleSlashKey(e) {
         if (state.gameState === 'HOME' || state.gameState === 'INTRO') return; 
+        if (state.isTutorialMode) return; 
         const devConsole = document.getElementById('dev-console');
         
         if (devConsole && !devConsole.classList.contains('hidden')) {

@@ -61,6 +61,11 @@ const state = window.state = {
     lastPhotoDragPos: null,
     trackedHandPos: null,
     isDraggingPhotoFish: false,
+    isTutorialMode: false,
+    tutorialStep: 0,
+    tutorialPaused: false,
+    spawnedExhaustionFish: false,
+    exhaustionSucceeded: false,
     computedDistanceScale: 1.0,
     assignedFishLanes: [],
     assignedBirdLanes: [],
@@ -79,7 +84,10 @@ const state = window.state = {
         goldTerror: false,
         goldSunray: false,
         goldTurtle: false,
-        forbiddenMammalEarned: false
+        forbiddenMammalEarned: false,
+        exhaustedCount: 0,
+        photosTakenCount: 0,
+        totalMoneyEarned: 0
     },
     playerEquipment: {
         rod: 'wood_rod',

@@ -621,6 +621,18 @@ body, html {
     color: #ffffff;
     border-color: #09090b;
 }
+.btn-modal-action.no-catch {
+    color: #ef4444 !important;
+    border-color: rgba(239, 68, 68, 0.4) !important;
+    background-color: rgba(254, 242, 242, 0.5) !important;
+    cursor: not-allowed;
+    opacity: 0.7;
+}
+.btn-modal-action.no-catch:hover {
+    background-color: rgba(254, 242, 242, 0.8) !important;
+    color: #ef4444 !important;
+    border-color: rgba(239, 68, 68, 0.6) !important;
+}
 @media (min-width: 640px) {
     .btn-modal-action {
         padding: 8px 24px;
@@ -805,6 +817,11 @@ body, html {
     background-color: rgba(254, 249, 195, 0.2);
     border-color: rgba(254, 240, 138, 0.6);
 }
+.catch-card.rarity-super-rare {
+    background-color: rgba(251, 207, 232, 0.25);
+    border-color: rgba(244, 114, 182, 0.7);
+    box-shadow: 0 0 10px rgba(244, 114, 182, 0.3);
+}
 
 .rarity-label {
     font-size: 8px;
@@ -839,6 +856,13 @@ body, html {
     color: #ca8a04;
     font-weight: 900;
     border-color: #fef08a;
+}
+.rarity-label.rarity-super-rare {
+    color: #db2777;
+    font-weight: 900;
+    border-color: #fbcfe8;
+    background-color: rgba(253, 242, 248, 0.8);
+    box-shadow: 0 0 4px rgba(244, 114, 182, 0.2);
 }
 
 .catch-card-header {
@@ -1689,3 +1713,61 @@ body, html {
         padding: 12px !important;
     }
 }
+
+/* Home Screen UI overlay style */
+.home-screen-ui-class {
+    position: absolute;
+    top: calc(50% - 120px);
+    left: 50%;
+    transform: translate(-50%, -50%);
+    text-align: center;
+    color: white;
+    z-index: 10;
+    pointer-events: auto;
+    transition: opacity 0.5s ease-out;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 30px;
+    width: 100%;
+    max-width: 600px;
+}
+
+#home-title {
+    font-family: 'Inter', sans-serif;
+    font-weight: 900;
+    font-size: 52px;
+    letter-spacing: 0.05em;
+    margin: 0;
+    color: #ffffff;
+    user-select: none;
+    pointer-events: none;
+    text-shadow: 0 4px 15px rgba(0, 0, 0, 0.4);
+}
+
+.home-buttons {
+    display: flex;
+    justify-content: center;
+    gap: 80px;
+}
+
+#home-start-btn, #home-tutorial-btn {
+    color: rgba(255, 255, 255, 0.7);
+    background: transparent;
+    border: none;
+    transition: all 0.2s ease-in-out;
+    font-family: monospace;
+    font-size: 24px;
+    font-weight: 900;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    padding: 4px 0;
+    outline: none;
+    cursor: pointer;
+}
+
+#home-start-btn:hover, #home-tutorial-btn:hover {
+    color: #ffffff;
+    text-decoration: underline;
+}
+
