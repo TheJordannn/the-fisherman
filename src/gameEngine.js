@@ -1270,8 +1270,8 @@ function drawEngine() {
         let Z = state.cameraZoom;
 
         let screenBtnX = (state.logicalWidth / 2 + START_UI_X_OFFSET - state.cameraX);
-        let startBtnX = screenBtnX - 100;
-        let tutorialBtnX = screenBtnX + 100;
+        let startBtnX = screenBtnX - 70;
+        let tutorialBtnX = screenBtnX + 70;
         let startBtnY = (400 - 150 - state.cameraY);
         let tutorialBtnY = (400 - 150 - state.cameraY);
         
@@ -1313,8 +1313,8 @@ function drawEngine() {
         if (isStartHovered) {
             let textW = ctx.measureText("GAME").width;
             ctx.beginPath();
-            ctx.moveTo(startBtnX - textW/2, startBtnY + 12);
-            ctx.lineTo(startBtnX + textW/2, startBtnY + 12);
+            ctx.moveTo(startBtnX - textW/2, startBtnY + 8);
+            ctx.lineTo(startBtnX + textW/2, startBtnY + 8);
             ctx.strokeStyle = '#ffffff';
             ctx.lineWidth = 1.0; // 1px clean line
             ctx.stroke();
@@ -1326,8 +1326,8 @@ function drawEngine() {
         if (isTutorialHovered) {
             let textW = ctx.measureText("TUTORIAL").width;
             ctx.beginPath();
-            ctx.moveTo(tutorialBtnX - textW/2, tutorialBtnY + 12);
-            ctx.lineTo(tutorialBtnX + textW/2, tutorialBtnY + 12);
+            ctx.moveTo(tutorialBtnX - textW/2, tutorialBtnY + 8);
+            ctx.lineTo(tutorialBtnX + textW/2, tutorialBtnY + 8);
             ctx.strokeStyle = '#ffffff';
             ctx.lineWidth = 1.0; // 1px clean line
             ctx.stroke();
